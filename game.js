@@ -22,6 +22,8 @@
 
 const canvas = document.getElementById('viewport');
 const ctx = canvas.getContext('2d');
+const roomBackground = new Image();
+roomBackground.src = 'asset/room_1.png';
 
 // View & World Constants
 const VIEW_ZOOM = 1.25;
@@ -30,10 +32,13 @@ const INTERACTION_DISTANCE = 80;
 
 // Game State
 const gameState = {
-  tasksTotal: 10,
+  tasksTotal: 20,
+  endingThreshold: 5,
   completedTasks: new Set(),
   isInteracting: false,
   isEnding: false,
+  selectedEnding: null,
+  lastCompletedPath: null,
   globalSaturation: 0,
   checklistOpen: false,
   unlockedBadges: JSON.parse(localStorage.getItem('different_day_badges') || '[]'),
@@ -43,6 +48,7 @@ const gameState = {
 const keys = {
   left: false,
   right: false,
+  speedBoost: false,
 };
 
 // Active Proximity Focus
@@ -147,13 +153,13 @@ const player = {
     // Keyboard Movement
     if (!gameState.isInteracting && !gameState.isEnding && !gameState.checklistOpen) {
       if (keys.left && !keys.right) {
-        this.vx = -this.speed;
+        this.vx = -this.speed * (keys.speedBoost ? 2 : 1);
         this.facing = -1;
         this.state = 'WALK';
         this.walkPhase += 0.12;
         this.handleFootsteps();
       } else if (keys.right && !keys.left) {
-        this.vx = this.speed;
+        this.vx = this.speed * (keys.speedBoost ? 2 : 1);
         this.facing = 1;
         this.state = 'WALK';
         this.walkPhase += 0.12;
@@ -213,7 +219,7 @@ const player = {
   draw(ctx) {
     ctx.save();
     ctx.translate(this.x, this.y);
-    ctx.scale(this.facing * 1.5, 1.5);
+    ctx.scale(this.facing * 3, 3);
 
     const bob = (this.state === 'WALK')
       ? Math.abs(Math.sin(this.walkPhase)) * 2.2
@@ -298,7 +304,7 @@ const player = {
 };
 
 // ==========================================
-// 10 Distinct Interactive Moments + Front Door
+// 20 Distinct Interactive Moments + Front Door
 // ==========================================
 const interactables = {
   // [Scene 0: 집 내부 현관문]
@@ -1109,73 +1115,17 @@ const scenes = {
     leftExit: null, // Room wall
     rightExit: { target: 'apartment_dense', spawnX: 70 },
     doors: [], // No alley doors!
-    interactables: ['home_door'],
+    interactables: ['home_door', 'morning_stretch', 'journal_entry'],
     drawBackground(ctx, sat) {
-      // Room Wall Background (Warm soft interior)
-      const wallColor = sat < 0.2 ? '#2a2e38' : '#38332e';
-      ctx.fillStyle = wallColor;
-      ctx.fillRect(-100, -80, this.width + 200, canvas.height);
+      ctx.fillStyle = sat < 0.2 ? '#20232b' : '#38332e';
+      ctx.fillRect(0, 0, this.width, canvas.height);
 
-      // Wooden Floor Planks
-      ctx.fillStyle = sat < 0.2 ? '#20232b' : '#2b211a';
-      ctx.fillRect(-100, GROUND_Y, this.width + 200, canvas.height - GROUND_Y);
-
-      // Planks seams
-      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-      ctx.lineWidth = 1.5;
-      for (let fx = 0; fx < this.width; fx += 50) {
-        ctx.beginPath();
-        ctx.moveTo(fx, GROUND_Y); ctx.lineTo(fx - 20, canvas.height);
-        ctx.stroke();
+      if (roomBackground.complete && roomBackground.naturalWidth > 0) {
+        const imageScale = this.width / roomBackground.naturalWidth;
+        const imageHeight = roomBackground.naturalHeight * imageScale;
+        const floorOffset = imageHeight * (253 / roomBackground.naturalHeight);
+        ctx.drawImage(roomBackground, 0, GROUND_Y - floorOffset, this.width, imageHeight);
       }
-
-      // Room Window (Morning Sunlight)
-      ctx.fillStyle = '#475569';
-      ctx.fillRect(80, GROUND_Y - 220, 110, 130);
-      // Sky through window
-      const winSky = ctx.createLinearGradient(0, GROUND_Y - 220, 0, GROUND_Y - 90);
-      winSky.addColorStop(0, '#93c5fd');
-      winSky.addColorStop(1, '#fef08a');
-      ctx.fillStyle = winSky;
-      ctx.fillRect(85, GROUND_Y - 215, 100, 120);
-
-      // Window cross frame
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(132, GROUND_Y - 215, 6, 120);
-      ctx.fillRect(85, GROUND_Y - 155, 100, 6);
-
-      // Cozy Bed (x: 220 to 380)
-      ctx.fillStyle = sat < 0.2 ? '#3b4352' : '#4b5563';
-      ctx.fillRect(220, GROUND_Y - 45, 150, 45); // Bed frame
-      ctx.fillStyle = sat < 0.2 ? '#cbd5e1' : '#f1f5f9';
-      ctx.fillRect(225, GROUND_Y - 60, 140, 20); // Mattress
-      ctx.fillStyle = sat < 0.2 ? '#64748b' : '#38bdf8';
-      ctx.fillRect(260, GROUND_Y - 60, 105, 40); // Blanket
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(230, GROUND_Y - 68, 28, 14); // Pillow
-
-      // Study Desk & Lamp (x: 420 to 560)
-      ctx.fillStyle = sat < 0.2 ? '#475569' : '#78350f';
-      ctx.fillRect(430, GROUND_Y - 75, 110, 10); // Tabletop
-      ctx.fillRect(440, GROUND_Y - 65, 8, 65);   // Leg
-      ctx.fillRect(525, GROUND_Y - 65, 8, 65);   // Leg
-
-      // Desk Lamp (Yellow glow)
-      ctx.fillStyle = '#fcd34d';
-      ctx.beginPath();
-      ctx.arc(455, GROUND_Y - 95, 6, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Wall Calendar / Picture Frame
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(450, GROUND_Y - 180, 50, 65);
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(455, GROUND_Y - 175, 40, 12);
-
-      // Shoes at the door
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(640, GROUND_Y - 6, 16, 6);
-      ctx.fillRect(660, GROUND_Y - 6, 16, 6);
     }
   },
 
@@ -1187,7 +1137,7 @@ const scenes = {
     leftExit: { target: 'home', spawnX: 720 },
     rightExit: { target: 'store_playground', spawnX: 70 },
     doors: [], // Alley shortcuts removed!
-    interactables: ['breeze', 'cat', 'flower'],
+    interactables: ['breeze', 'cat', 'flower', 'security_greeting', 'parking_cloudwatch'],
     drawBackground(ctx, sat) {
       // Sky
       const sky = ctx.createLinearGradient(0, -50, 0, 160);
@@ -1325,7 +1275,7 @@ const scenes = {
     leftExit: { target: 'apartment_dense', spawnX: 1180 },
     rightExit: { target: 'academy_dense', spawnX: 70 },
     doors: [], // No doors!
-    interactables: ['swing', 'gacha', 'snack'],
+    interactables: ['swing', 'gacha', 'snack', 'playground_slide', 'playground_friend'],
     drawBackground(ctx, sat) {
       // Sky
       const sky = ctx.createLinearGradient(0, -50, 0, 160);
@@ -1464,7 +1414,7 @@ const scenes = {
     leftExit: { target: 'store_playground', spawnX: 1180 },
     rightExit: { target: 'school_field', spawnX: 70 },
     doors: [], // No doors!
-    interactables: ['sprint', 'bookstore'],
+    interactables: ['sprint', 'bookstore', 'study_pause', 'street_melody'],
     drawBackground(ctx, sat) {
       // Sky
       const sky = ctx.createLinearGradient(0, -50, 0, 160);
@@ -1526,7 +1476,7 @@ const scenes = {
     leftExit: { target: 'academy_dense', spawnX: 1120 },
     rightExit: { target: 'home', spawnX: 70 }, // LOOP BACK TO HOME!
     doors: [], // No doors!
-    interactables: ['cherry_wish', 'hilltop_sky'],
+    interactables: ['cherry_wish', 'hilltop_sky', 'soccer_practice', 'cheer_team'],
     drawBackground(ctx, sat) {
       // Expansive Sky
       const sky = ctx.createLinearGradient(0, -60, 0, 190);
@@ -1646,6 +1596,144 @@ const scenes = {
   }
 };
 
+function createExtraMoment(config) {
+  return {
+    ...config,
+    width: 64,
+    height: 72,
+    duration: 105,
+    onTrigger(player) {
+      player.state = 'EVENT';
+      player.eventTimer = 0;
+      player.eventMaxTime = this.duration;
+      player.currentEvent = {
+        id: this.id,
+        onUpdate(p, timer) {
+          if (timer % 18 === 0) {
+            createParticle(p.x + 12, p.y - 42, (Math.random() - 0.5) * 1.4, -1.2, this.colorAura, 3, 28, 'sparkle');
+          }
+        },
+        customDraw(ctx) {
+          ctx.fillStyle = '#0c0e12';
+          ctx.fillRect(-6, -16, 5, 16);
+          ctx.fillStyle = '#15171d';
+          ctx.fillRect(2, -16, 5, 16);
+          ctx.fillRect(-7, -38, 14, 23);
+          ctx.fillStyle = this.colorAura;
+          ctx.fillRect(-6, -40, 12, 5);
+          ctx.fillStyle = '#15171d';
+          ctx.fillRect(-5, -50, 11, 11);
+        }
+      };
+      player.currentEvent.colorAura = this.colorAura;
+    },
+    draw(ctx) {
+      const isDone = gameState.completedTasks.has(this.id);
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.fillStyle = isDone ? this.colorAura : '#475569';
+      ctx.beginPath();
+      ctx.arc(0, -25, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#f8fafc';
+      ctx.font = '22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.symbol, 0, -18);
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillRect(-14, -2, 28, 3);
+
+      if (this === activeInteractable) {
+        ctx.strokeStyle = this.colorAura;
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(-30, -55, 60, 58);
+      }
+      ctx.restore();
+    }
+  };
+}
+
+Object.assign(interactables, {
+  morning_stretch: createExtraMoment({
+    id: 'morning_stretch', name: '창가에서 아침 스트레칭하기', sceneName: '아늑한 내 방 (집)',
+    badge: '🧘 아침 기지개', scene: 'home', x: 320, y: GROUND_Y, colorAura: '#f59e0b',
+    symbol: '☀️', endingPath: 'warmth', thought: '창문을 열고 천천히 몸을 늘인다. 굳은 어깨에 아침 햇살이 포근하게 내려앉는다.'
+  }),
+  journal_entry: createExtraMoment({
+    id: 'journal_entry', name: '책상에 오늘의 마음 적기', sceneName: '아늑한 내 방 (집)',
+    badge: '✍️ 첫 문장', scene: 'home', x: 520, y: GROUND_Y, colorAura: '#60a5fa',
+    symbol: '✎', endingPath: 'discovery', thought: '짧은 문장 하나로 오늘의 마음을 적어 둔다. 아직 오지 않은 하루가 조금 궁금해진다.'
+  }),
+  security_greeting: createExtraMoment({
+    id: 'security_greeting', name: '경비 아저씨에게 먼저 인사하기', sceneName: '아파트 단지 & 주차장',
+    badge: '👋 반가운 인사', scene: 'apartment_dense', x: 720, y: GROUND_Y, colorAura: '#fb7185',
+    symbol: '👋', endingPath: 'warmth', thought: '짧은 인사에 경비 아저씨가 환하게 웃어 주신다. 늘 지나치던 길이 조금 가까워진다.'
+  }),
+  parking_cloudwatch: createExtraMoment({
+    id: 'parking_cloudwatch', name: '주차장에서 구름 모양 찾기', sceneName: '아파트 단지 & 주차장',
+    badge: '☁️ 구름 관찰', scene: 'apartment_dense', x: 1120, y: GROUND_Y, colorAura: '#38bdf8',
+    symbol: '☁', endingPath: 'discovery', thought: '바쁜 걸음을 멈추고 구름을 올려다본다. 저 구름은 꼭 커다란 고래를 닮았다.'
+  }),
+  playground_slide: createExtraMoment({
+    id: 'playground_slide', name: '미끄럼틀을 타고 내려오기', sceneName: '어린이 놀이터 & 문방구 상가',
+    badge: '🛝 바람 타기', scene: 'store_playground', x: 390, y: GROUND_Y, colorAura: '#f97316',
+    symbol: '↘', endingPath: 'freedom', thought: '미끄럼틀 꼭대기에서 잠깐 망설이다 몸을 맡긴다. 바람을 가르며 내려오는 순간, 웃음이 터진다.'
+  }),
+  playground_friend: createExtraMoment({
+    id: 'playground_friend', name: '놀이터 친구와 공 주고받기', sceneName: '어린이 놀이터 & 문방구 상가',
+    badge: '⚽ 함께한 공', scene: 'store_playground', x: 650, y: GROUND_Y, colorAura: '#34d399',
+    symbol: '⚽', endingPath: 'warmth', thought: '처음 보는 아이와 공을 주고받는다. 이름은 몰라도 함께 웃은 순간은 오래 기억날 것 같다.'
+  }),
+  study_pause: createExtraMoment({
+    id: 'study_pause', name: '학원가 골목에서 잠깐 눈 감기', sceneName: '빽빽한 학원가 거리',
+    badge: '🌿 짧은 쉼표', scene: 'academy_dense', x: 560, y: GROUND_Y, colorAura: '#4ade80',
+    symbol: '…', endingPath: 'discovery', thought: '쏟아지는 간판과 발걸음 소리 사이에서 잠시 눈을 감는다. 내 호흡이 다시 들린다.'
+  }),
+  street_melody: createExtraMoment({
+    id: 'street_melody', name: '거리의 작은 음악에 귀 기울이기', sceneName: '빽빽한 학원가 거리',
+    badge: '🎵 거리의 선율', scene: 'academy_dense', x: 1040, y: GROUND_Y, colorAura: '#c084fc',
+    symbol: '♫', endingPath: 'warmth', thought: '어디선가 흘러나온 익숙한 멜로디에 발걸음을 늦춘다. 하루가 잠깐 다정해진다.'
+  }),
+  soccer_practice: createExtraMoment({
+    id: 'soccer_practice', name: '운동장에서 골대 향해 슛하기', sceneName: '학교 교문 & 운동장',
+    badge: '🥅 힘찬 슛', scene: 'school_field', x: 720, y: GROUND_Y, colorAura: '#facc15',
+    symbol: '⚽', endingPath: 'freedom', thought: '발끝으로 공을 힘껏 차 올린다. 골대를 향해 날아가는 공처럼 마음도 가벼워진다.'
+  }),
+  cheer_team: createExtraMoment({
+    id: 'cheer_team', name: '운동장 친구들에게 응원 보내기', sceneName: '학교 교문 & 운동장',
+    badge: '📣 힘이 되는 응원', scene: 'school_field', x: 900, y: GROUND_Y, colorAura: '#fb7185',
+    symbol: '!', endingPath: 'warmth', thought: '힘차게 응원을 보내자 친구들이 손을 흔든다. 서로를 북돋우는 목소리가 운동장에 울린다.'
+  })
+});
+
+const endingPaths = {
+  breeze: 'discovery', cat: 'warmth', flower: 'discovery', swing: 'freedom', gacha: 'freedom',
+  snack: 'warmth', sprint: 'freedom', bookstore: 'discovery', cherry_wish: 'warmth', hilltop_sky: 'discovery'
+};
+Object.entries(endingPaths).forEach(([id, path]) => {
+  interactables[id].endingPath = path;
+});
+
+const endingStories = {
+  freedom: {
+    name: '자유의 엔딩',
+    badge: '✨ 내 마음이 향하는 곳으로',
+    title: '바람을 따라, 나만의 속도로',
+    description: '오늘은 해야 할 일보다 마음이 먼저 향하는 곳을 따라 걸었습니다. 마음껏 뛰고 웃었던 순간들이 내일의 걸음을 조금 더 가볍게 만듭니다.'
+  },
+  warmth: {
+    name: '온기의 엔딩',
+    badge: '💛 서로에게 건넨 작은 온기',
+    title: '다정함이 이어 준 하루',
+    description: '먼저 건넨 인사와 함께 나눈 웃음이 하루를 바꾸었습니다. 작고 다정한 순간들은 서로의 마음에 남아 따뜻한 길을 만듭니다.'
+  },
+  discovery: {
+    name: '발견의 엔딩',
+    badge: '🌱 익숙한 곳에서 찾은 새로운 마음',
+    title: '늘 걷던 길에서 발견한 나',
+    description: '잠시 멈춰 바라본 풍경과 마음속에 남긴 문장들이 새로운 생각을 열었습니다. 익숙한 동네에서 발견한 작은 변화가 나만의 다음 길이 됩니다.'
+  }
+};
+
 // Current Active Scene (START AT HOME!)
 let currentSceneId = 'home';
 let currentScene = scenes[currentSceneId];
@@ -1688,9 +1776,9 @@ function finishInteraction() {
   if (obj && !obj.isSpecialTransition && !gameState.completedTasks.has(obj.id)) {
     gameState.completedTasks.add(obj.id);
     obj.completed = true;
+    gameState.lastCompletedPath = obj.endingPath;
 
-    // Saturation increments
-    gameState.globalSaturation = Math.min(1.0, gameState.completedTasks.size / gameState.tasksTotal);
+    gameState.globalSaturation = Math.min(1.0, gameState.completedTasks.size / gameState.endingThreshold);
 
     window.soundEngine.playProgressMilestone();
 
@@ -1711,10 +1799,23 @@ function finishInteraction() {
   player.currentEvent = null;
   gameState.isInteracting = false;
 
-  // Check 10/10 tasks for grand ending
-  if (gameState.completedTasks.size >= gameState.tasksTotal) {
+  if (gameState.completedTasks.size >= gameState.endingThreshold) {
     triggerGrandEndingSequence();
   }
+}
+
+function determineEndingPath() {
+  const counts = { freedom: 0, warmth: 0, discovery: 0 };
+  gameState.completedTasks.forEach(id => {
+    const path = interactables[id]?.endingPath;
+    if (path) counts[path]++;
+  });
+
+  const highestCount = Math.max(...Object.values(counts));
+  const leadingPaths = Object.keys(counts).filter(path => counts[path] === highestCount);
+  return leadingPaths.includes(gameState.lastCompletedPath)
+    ? gameState.lastCompletedPath
+    : leadingPaths[0];
 }
 
 function updateHUD() {
@@ -1722,11 +1823,13 @@ function updateHUD() {
   const total = gameState.tasksTotal;
   const percent = Math.round((count / total) * 100);
 
-  document.getElementById('progress-bar').style.width = `${percent}%`;
-  document.getElementById('progress-number').textContent = `${count} / ${total} (${percent}%)`;
+  const progressBar = document.getElementById('progress-bar');
+  const progressNumber = document.getElementById('progress-number');
+  if (progressBar) progressBar.style.width = `${percent}%`;
+  if (progressNumber) progressNumber.textContent = `${count} / ${total} (${percent}%)`;
 }
 
-// 10-Task Checklist Modal Updates
+// 20-Task Checklist Modal Updates
 function updateChecklistModal() {
   const listContainer = document.getElementById('checklist-items');
   listContainer.innerHTML = '';
@@ -1764,8 +1867,9 @@ function toggleChecklistModal(forceState) {
   }
 }
 
-// Grand Ending Sequence (10/10 Fulfillment)
+// Grand Ending Sequence (5 of 20 Moments)
 function triggerGrandEndingSequence() {
+  gameState.selectedEnding = determineEndingPath();
   gameState.isEnding = true;
   player.state = 'IDLE';
 
@@ -1790,16 +1894,24 @@ function triggerGrandEndingSequence() {
 }
 
 function showEndingModal() {
+  const ending = endingStories[gameState.selectedEnding];
+  const endingModal = document.getElementById('ending-modal');
+  endingModal.dataset.ending = gameState.selectedEnding;
+  document.getElementById('ending-badge').textContent = ending.badge;
+  document.getElementById('ending-title').textContent = ending.title;
+  document.getElementById('ending-desc').textContent = ending.description;
+
   const choicesList = document.getElementById('choices-list');
   choicesList.innerHTML = '';
 
-  Object.values(interactables).forEach(task => {
-    if (task.isSpecialTransition) return;
+  gameState.completedTasks.forEach(id => {
+    const task = interactables[id];
     const item = document.createElement('div');
     item.className = 'choice-item';
     item.innerHTML = `<span class="choice-bullet">✓</span> <span>${task.name}</span>`;
     choicesList.appendChild(item);
   });
+  document.getElementById('choices-summary-title').textContent = `오늘 달성한 순간 (${gameState.completedTasks.size} / ${gameState.tasksTotal})`;
 
   const badgesGrid = document.getElementById('badges-grid');
   badgesGrid.innerHTML = '';
@@ -1816,14 +1928,17 @@ function showEndingModal() {
     `;
     badgesGrid.appendChild(card);
   });
+  document.getElementById('badges-title').textContent = `🏆 일상 달성 배지 (${gameState.unlockedBadges.length} / ${gameState.tasksTotal} 해금)`;
 
-  document.getElementById('ending-modal').classList.add('active');
+  endingModal.classList.add('active');
 }
 
 function resetGame() {
   gameState.completedTasks.clear();
   gameState.isInteracting = false;
   gameState.isEnding = false;
+  gameState.selectedEnding = null;
+  gameState.lastCompletedPath = null;
   gameState.globalSaturation = 0;
 
   Object.values(interactables).forEach(obj => obj.completed = false);
@@ -1832,7 +1947,9 @@ function resetGame() {
 
   updateHUD();
   updateChecklistModal();
-  document.getElementById('ending-modal').classList.remove('active');
+  const endingModal = document.getElementById('ending-modal');
+  endingModal.classList.remove('active');
+  delete endingModal.dataset.ending;
   document.getElementById('narration-box').classList.remove('active');
   toggleChecklistModal(false);
 }
@@ -2015,6 +2132,9 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
     keys.right = true;
   }
+  if (e.key === '1') {
+    keys.speedBoost = true;
+  }
 
   // Interaction with Space / E / Enter / F
   if (e.key === 'e' || e.key === 'E' || e.key === ' ' || e.key === 'Enter' || e.key === 'f' || e.key === 'F') {
@@ -2036,6 +2156,9 @@ window.addEventListener('keyup', (e) => {
   if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
     keys.right = false;
   }
+  if (e.key === '1') {
+    keys.speedBoost = false;
+  }
 });
 
 // UI Buttons
@@ -2044,9 +2167,12 @@ document.getElementById('audio-toggle').addEventListener('click', () => {
   document.getElementById('audio-icon').textContent = isMuted ? '🔇' : '🔊';
 });
 
-document.getElementById('checklist-toggle-btn').addEventListener('click', () => {
-  toggleChecklistModal();
-});
+const checklistToggleBtn = document.getElementById('checklist-toggle-btn');
+if (checklistToggleBtn) {
+  checklistToggleBtn.addEventListener('click', () => {
+    toggleChecklistModal();
+  });
+}
 
 document.getElementById('checklist-close-btn').addEventListener('click', () => {
   toggleChecklistModal(false);

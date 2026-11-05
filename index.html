@@ -11,34 +11,15 @@
     <canvas id="viewport" width="1000" height="560"></canvas>
 
     <div id="ui-overlay">
-      <!-- Top-Left HUD (Progress & Location) -->
+      <!-- Top-Left HUD (Location & Title) -->
       <div class="hud-panel">
-        <div class="title-row">
-          <span class="title-tag">2D Daily Adventure</span>
-          <button id="checklist-toggle-btn" class="checklist-toggle-btn" title="10가지 과제 목록 열기 (Tab)">
-            📋 10가지 과제 <span class="btn-key">[Tab]</span>
-          </button>
-        </div>
+        <span class="title-tag">2D Daily Adventure</span>
         <h1 class="game-title">오늘은 조금 다른 하루</h1>
         <div id="location-badge" class="location-badge">📍 아늑한 내 방 (집)</div>
-        <div class="progress-container">
-          <div class="progress-info">
-            <span class="progress-label">오늘의 충족 조건</span>
-            <span id="progress-number" class="progress-number">0 / 10 (0%)</span>
-          </div>
-          <div class="progress-track">
-            <div id="progress-bar" class="progress-bar"></div>
-          </div>
-        </div>
       </div>
 
-      <!-- Top-Right Panel (Keyboard Controls Hint & Sound) -->
+      <!-- Top-Right Panel (Sound Toggle) -->
       <div class="top-right-panel">
-        <div class="controls-hint">
-          <div class="hint-row"><span class="hint-label">이동:</span> <span class="key-badge">←</span> <span class="key-badge">→</span> <span class="hint-or">또는</span> <span class="key-badge">A</span> <span class="key-badge">D</span></div>
-          <div class="hint-row"><span class="hint-label">상호작용:</span> <span class="key-badge">E</span> <span class="hint-or">또는</span> <span class="key-badge">Space</span></div>
-          <div class="hint-row"><span class="hint-label">과제 목록:</span> <span class="key-badge">Tab</span></div>
-        </div>
         <button id="audio-toggle" class="audio-btn" title="사운드 켜기/끄기">
           <span id="audio-icon">🔊</span>
         </button>
@@ -53,19 +34,28 @@
       <!-- Floating Narrative Caption -->
       <div id="narration-box"></div>
 
-      <!-- 10-Task Checklist Modal (Toggled by Tab or button) -->
+      <!-- 20-Task Checklist Modal (Toggled by Tab) -->
       <div id="checklist-modal" class="checklist-modal">
         <div class="checklist-card">
           <div class="checklist-header">
             <div class="checklist-title-wrap">
-              <span class="checklist-subtitle">TODAY'S 10 MOMENTS</span>
-              <h2 class="checklist-title">오늘 충족해야 할 10가지 순간</h2>
+              <span class="checklist-subtitle">TODAY'S 20 MOMENTS</span>
+              <h2 class="checklist-title">오늘 발견할 20가지 순간</h2>
             </div>
             <button id="checklist-close-btn" class="close-btn" title="닫기 (Tab / Esc)">✕</button>
           </div>
           <p class="checklist-desc">
-            4개의 거리를 누비며 동네 곳곳에 숨겨진 10가지 특별한 순간을 키보드(<span class="key-badge">E</span> 또는 <span class="key-badge">Space</span>)로 직접 경험해 보세요.
+            20가지 순간 중 5가지를 경험하면, 오늘의 선택에 따라 세 가지 엔딩 중 하나를 만나게 됩니다. 키보드(<span class="key-badge">E</span> 또는 <span class="key-badge">Space</span>)로 조사해 보세요.
           </p>
+          <div class="progress-container modal-progress">
+            <div class="progress-info">
+              <span class="progress-label">오늘의 순간 달성 현황 (엔딩까지 5개)</span>
+              <span id="progress-number" class="progress-number">0 / 20 (0%)</span>
+            </div>
+            <div class="progress-track">
+              <div id="progress-bar" class="progress-bar"></div>
+            </div>
+          </div>
           <div id="checklist-items" class="checklist-items">
             <!-- Dynamically injected items -->
           </div>
@@ -75,26 +65,22 @@
         </div>
       </div>
 
-      <!-- Ending Modal (Triggered when 10 tasks are all fulfilled) -->
+      <!-- Ending Modal (Triggered after 5 of 20 tasks) -->
       <div id="ending-modal">
         <div class="ending-card">
-          <div id="ending-badge" class="ending-badge">✨ 10가지 충족 완료 — 대단원 엔딩</div>
-          <h2 id="ending-title" class="ending-title">어제와는 조금 다른, 눈부시게 빛나는 하루</h2>
-          <p id="ending-desc" class="ending-desc">
-            아파트 단지의 작은 들꽃부터 문방구의 두근거리는 뽑기, 신호등 질주와 학교 언덕의 탁 트인 하늘까지—<br>
-            익숙하고 무심했던 동네 곳곳에서 10가지 소중한 순간들을 스스로 발견하고 채워 넣었습니다.<br>
-            늘 똑같이 흘러가던 회색빛 일상이 마침내 따스하고 다채로운 빛깔로 가득 물들었습니다.
-          </p>
+          <div id="ending-badge" class="ending-badge">오늘의 선택이 만든 엔딩</div>
+          <h2 id="ending-title" class="ending-title">오늘의 이야기가 완성되었습니다</h2>
+          <p id="ending-desc" class="ending-desc">스무 가지 순간 가운데 다섯 가지를 경험하고 오늘만의 결말을 만났습니다.</p>
 
           <div class="choices-summary">
-            <div class="choices-summary-title">내가 오늘 충족한 10가지 소중한 경험</div>
+            <div id="choices-summary-title" class="choices-summary-title">오늘 달성한 순간</div>
             <div id="choices-list" class="choices-list">
               <!-- Choices dynamically injected -->
             </div>
           </div>
 
           <div class="viewed-endings">
-            <div class="badges-title">🏆 10가지 일상 달성 배지 컬렉션 (모두 해금됨!)</div>
+            <div id="badges-title" class="badges-title">🏆 일상 달성 배지</div>
             <div id="badges-grid" class="badges-grid">
               <!-- 10 Badges -->
             </div>
