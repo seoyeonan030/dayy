@@ -1746,7 +1746,8 @@ function changeScene(sceneId, spawnX) {
   player.state = 'IDLE';
 
   // Update Location Badge HUD
-  document.getElementById('location-badge').textContent = `📍 ${currentScene.name}`;
+  const locBadge = document.getElementById('location-badge');
+  if (locBadge) locBadge.textContent = `📍 ${currentScene.name}`;
 
   // Center camera
   camera.x = Math.max(0, Math.min(currentScene.width - camera.width, player.x - camera.width / 2));
@@ -2050,21 +2051,23 @@ function gameLoop() {
     }
   }
 
-  // Update In-World Proximity Prompt Position
+  // Update In-World Proximity Prompt Position (if element exists)
   const promptEl = document.getElementById('proximity-prompt');
-  const promptText = document.getElementById('prompt-text');
-  const canvasRect = canvas.getBoundingClientRect();
+  if (promptEl) {
+    const promptText = document.getElementById('prompt-text');
+    const canvasRect = canvas.getBoundingClientRect();
 
-  if (activeInteractable) {
-    const screenX = ((activeInteractable.x - camera.x) * VIEW_ZOOM) * (canvasRect.width / canvas.width);
-    const screenY = ((activeInteractable.y - activeInteractable.height - 25) * VIEW_ZOOM) * (canvasRect.height / canvas.height);
+    if (activeInteractable) {
+      const screenX = ((activeInteractable.x - camera.x) * VIEW_ZOOM) * (canvasRect.width / canvas.width);
+      const screenY = ((activeInteractable.y - activeInteractable.height - 25) * VIEW_ZOOM) * (canvasRect.height / canvas.height);
 
-    promptEl.style.left = `${screenX}px`;
-    promptEl.style.top = `${screenY}px`;
-    promptText.textContent = `${activeInteractable.name}`;
-    promptEl.classList.add('visible');
-  } else {
-    promptEl.classList.remove('visible');
+      promptEl.style.left = `${screenX}px`;
+      promptEl.style.top = `${screenY}px`;
+      if (promptText) promptText.textContent = `${activeInteractable.name}`;
+      promptEl.classList.add('visible');
+    } else {
+      promptEl.classList.remove('visible');
+    }
   }
 
   // Render Frame
@@ -2103,6 +2106,12 @@ function gameLoop() {
 // Keyboard Event Handlers (Strictly Keyboard-Only Controls)
 window.addEventListener('keydown', (e) => {
   window.soundEngine.ensureResume();
+
+  // Sound Mute Toggle with 'M' key
+  if (e.key === 'm' || e.key === 'M') {
+    window.soundEngine.toggleMute();
+    return;
+  }
 
   // Ending Modal Key Controls
   if (gameState.isEnding) {
@@ -2161,11 +2170,15 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-// UI Buttons
-document.getElementById('audio-toggle').addEventListener('click', () => {
-  const isMuted = window.soundEngine.toggleMute();
-  document.getElementById('audio-icon').textContent = isMuted ? '🔇' : '🔊';
-});
+// UI Buttons (Null-safe)
+const audioToggle = document.getElementById('audio-toggle');
+if (audioToggle) {
+  audioToggle.addEventListener('click', () => {
+    const isMuted = window.soundEngine.toggleMute();
+    const audioIcon = document.getElementById('audio-icon');
+    if (audioIcon) audioIcon.textContent = isMuted ? '🔇' : '🔊';
+  });
+}
 
 const checklistToggleBtn = document.getElementById('checklist-toggle-btn');
 if (checklistToggleBtn) {
@@ -2174,13 +2187,19 @@ if (checklistToggleBtn) {
   });
 }
 
-document.getElementById('checklist-close-btn').addEventListener('click', () => {
-  toggleChecklistModal(false);
-});
+const checklistCloseBtn = document.getElementById('checklist-close-btn');
+if (checklistCloseBtn) {
+  checklistCloseBtn.addEventListener('click', () => {
+    toggleChecklistModal(false);
+  });
+}
 
-document.getElementById('restart-btn').addEventListener('click', () => {
-  resetGame();
-});
+const restartBtn = document.getElementById('restart-btn');
+if (restartBtn) {
+  restartBtn.addEventListener('click', () => {
+    resetGame();
+  });
+}
 
 // Responsive Aspect Ratio Scaling
 function handleResize() {

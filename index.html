@@ -11,26 +11,6 @@
     <canvas id="viewport" width="1000" height="560"></canvas>
 
     <div id="ui-overlay">
-      <!-- Top-Left HUD (Location & Title) -->
-      <div class="hud-panel">
-        <span class="title-tag">2D Daily Adventure</span>
-        <h1 class="game-title">오늘은 조금 다른 하루</h1>
-        <div id="location-badge" class="location-badge">📍 아늑한 내 방 (집)</div>
-      </div>
-
-      <!-- Top-Right Panel (Sound Toggle) -->
-      <div class="top-right-panel">
-        <button id="audio-toggle" class="audio-btn" title="사운드 켜기/끄기">
-          <span id="audio-icon">🔊</span>
-        </button>
-      </div>
-
-      <!-- In-world Proximity Prompt (Floating above interactable) -->
-      <div id="proximity-prompt" class="proximity-prompt">
-        <span class="prompt-key">E</span>
-        <span id="prompt-text" class="prompt-text">상호작용</span>
-      </div>
-
       <!-- Floating Narrative Caption -->
       <div id="narration-box"></div>
 
@@ -60,7 +40,7 @@
             <!-- Dynamically injected items -->
           </div>
           <div class="checklist-footer">
-            <span class="checklist-tip">💡 키보드 <span class="key-badge">Tab</span> 키를 눌러 언제든 목록을 열고 닫을 수 있습니다.</span>
+            <span class="checklist-tip">💡 <span class="key-badge">Tab</span> 키로 닫기 | 이동: <span class="key-badge">←</span> <span class="key-badge">→</span> / <span class="key-badge">A</span> <span class="key-badge">D</span> | 조사: <span class="key-badge">E</span> / <span class="key-badge">Space</span> | 달리기: <span class="key-badge">1</span> | 음소거: <span class="key-badge">M</span></span>
           </div>
         </div>
       </div>

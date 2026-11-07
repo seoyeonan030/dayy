@@ -42,7 +42,13 @@ canvas#viewport {
   pointer-events: none;
 }
 
-/* Header HUD */
+/* Hidden On-Screen UI (HUD, Controls, Proximity Prompt) */
+.hud-panel,
+.top-right-panel,
+.proximity-prompt {
+  display: none !important;
+}
+
 .hud-panel {
   position: absolute;
   top: 20px;
