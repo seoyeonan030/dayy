@@ -7,6 +7,13 @@ const ctx = canvas.getContext('2d');
 const VIEW_ZOOM = 1;
 const GROUND_Y = canvas.height;
 const PLAYER_BASE_Y = GROUND_Y;
+const PLANTER_SHIFT = 112;
+const PLANTER_RAISE = 48;
+const PLANTER_DROP = 48;
+const FLOWER_CENTER = 274.75;
+const FLOWER_CENTER_TOP = 210;
+const WINDOW_COLOR = '#dedede';
+const BUS_STOP_LEFT_SHIFT = 40;
 
 // Game State
 const gameState = { globalSaturation: 0 };
@@ -96,24 +103,43 @@ const player = {
   walkPhase: 0,
   idlePhase: 0,
   state: 'IDLE', // IDLE, WALK
+  sitting: null,
   stepCooldown: 0,
 
   update(currentScene) {
     this.idlePhase += 0.035;
 
-    if (sceneTransition.active) {
+    if (gameFlow.mode === 'crossing') {
+      this.vx = 0;
+      this.facing = 1;
+      this.state = 'WALK';
+      this.walkPhase += 0.12;
+      this.handleFootsteps();
+      return;
+    }
+
+    if (sceneTransition.active || (currentScene.id === 'bus_stop' && busArrival.state === 'departing') ||
+        (currentScene.id === 'bus' && busJourney.state === 'moving')) {
       this.vx = 0;
       return;
     }
 
+    if (this.sitting) {
+      if (!keys.left && !keys.right) {
+        this.vx = 0;
+        return;
+      }
+      this.sitting = null;
+    }
+
     if (keys.left && !keys.right) {
-      this.vx = -this.speed * (keys.speedBoost ? 3 : 1);
+      this.vx = -this.speed * (keys.speedBoost ? 6 : 1);
       this.facing = -1;
       this.state = 'WALK';
       this.walkPhase += 0.12;
       this.handleFootsteps();
     } else if (keys.right && !keys.left) {
-      this.vx = this.speed * (keys.speedBoost ? 3 : 1);
+      this.vx = this.speed * (keys.speedBoost ? 6 : 1);
       this.facing = 1;
       this.state = 'WALK';
       this.walkPhase += 0.12;
@@ -126,6 +152,25 @@ const player = {
     this.x += this.vx;
 
     // Boundary Transitions
+    if (currentScene.id === 'home_front' && !gameFlow.visitedSchool && this.vx < 0 && this.x <= 75) {
+      this.x = 85;
+      this.vx = 0;
+      this.state = 'IDLE';
+      gameFlow.dialogue = '학교에 가야 한다.';
+      gameFlow.activityMotion = null;
+      setFlowMode('dialogue');
+      return;
+    }
+    if (currentScene.id === 'living_room' && !gameFlow.ateToday && !gameFlow.skipMealGate &&
+        ((currentScene.leftExit && this.x <= 25) || (currentScene.rightExit && this.x >= currentScene.width - 25))) {
+      this.x = Math.max(26, Math.min(currentScene.width - 26, this.x));
+      this.vx = 0;
+      this.state = 'IDLE';
+      gameFlow.dialogue = '배가 고프다.';
+      gameFlow.activityMotion = null;
+      setFlowMode('dialogue');
+      return;
+    }
     if (currentScene.leftExit && this.x <= 25) {
       sceneTransition.start(currentScene.leftExit.target, currentScene.leftExit.spawnX);
     } else if (currentScene.rightExit && this.x >= currentScene.width - 25) {
@@ -147,6 +192,53 @@ const player = {
 
   draw(ctx) {
     const scale = 3.8;
+    const activityMotion = gameFlow.mode === 'dialogue' ? gameFlow.activityMotion : null;
+    if (this.sitting) {
+      ctx.save();
+      ctx.translate(this.x, this.sitting.seatY);
+      ctx.scale(this.facing * scale, scale);
+      ctx.fillStyle = '#ffffff';
+      const torsoLength = this.sitting.seatId === 'bus_stop_bench' ? 15 : 22;
+      ctx.fillRect(-2.5, -torsoLength - 11, 8.5, 11);
+      ctx.fillRect(-2.5, -torsoLength, 4, torsoLength);
+      if (activityMotion === 'cat') {
+        const strokeOffset = Math.sin(performance.now() / 120) * 1.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3.3;
+        ctx.beginPath();
+        ctx.moveTo(1, -torsoLength + 3);
+        ctx.lineTo(13, -10);
+        ctx.lineTo(25 + strokeOffset, -7);
+        ctx.stroke();
+      } else if (activityMotion === 'cereal') {
+        const spoonProgress = (1 + Math.cos(performance.now() / 240)) / 2;
+        const handX = 7 + 14 * spoonProgress;
+        const handY = -26 + 12 * spoonProgress;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3.3;
+        ctx.beginPath();
+        ctx.moveTo(1, -19);
+        ctx.lineTo(8, -14);
+        ctx.lineTo(handX, handY);
+        ctx.stroke();
+        ctx.strokeStyle = '#777777';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(handX, handY);
+        ctx.lineTo(handX + 3, handY + 1);
+        ctx.stroke();
+        ctx.fillStyle = '#777777';
+        ctx.fillRect(handX + 2.5, handY, 2, 2);
+        ctx.fillStyle = '#ffffff';
+      } else {
+        ctx.fillRect(0, -torsoLength + 3, 3.3, torsoLength - 6);
+      }
+      ctx.fillRect(-2.5, -3, 11, 4);
+      ctx.fillRect(5, 0, 4, (GROUND_Y - this.sitting.seatY) / scale);
+      ctx.fillRect(5, (GROUND_Y - this.sitting.seatY) / scale - 2.5, 7, 2.5);
+      ctx.restore();
+      return;
+    }
     const bob = (this.state === 'WALK')
       ? Math.abs(Math.sin(this.walkPhase)) * 2.2
       : Math.sin(this.idlePhase) * 1.0;
@@ -174,16 +266,29 @@ const player = {
       ctx.restore();
     };
 
-    // Rear-side arm and leg sit behind the simple upright silhouette.
-    drawLimb(-2.5, -35, 18, armWidth, armSwing);
     drawLimb(-0.5, -14, 15, legWidth, -legSwing, true);
-
-    // A long rectangular body with a square head block projecting forward.
-    ctx.fillRect(-2.5, -39 + bob, bodyWidth, 25);
-    ctx.fillRect(-2.5, -50 + bob, 8.5, 11);
-
-    // The visible arm and leg use the same simple block shapes.
-    drawLimb(1, -35, 18, armWidth, -armSwing);
+    if (activityMotion === 'flower') {
+      ctx.save();
+      ctx.translate(-0.5, -14 + bob);
+      ctx.rotate(Math.PI / 4);
+      ctx.fillRect(-2, -25, bodyWidth, 25);
+      ctx.fillRect(-2, -36, 8.5, 11);
+      ctx.fillRect(0, -21, armWidth, 18);
+      ctx.restore();
+    } else {
+      drawLimb(-2.5, -35, 18, armWidth, armSwing);
+      ctx.fillRect(-2.5, -39 + bob, bodyWidth, 25);
+      ctx.fillRect(-2.5, -50 + bob, 8.5, 11);
+      if (activityMotion === 'guard') {
+        drawLimb(1, -35, 18, armWidth, -2.3 + Math.sin(performance.now() / 120) * 0.3);
+      } else if (activityMotion === 'cat') {
+        drawLimb(1, -35, 24, armWidth, -0.9 + Math.sin(performance.now() / 120) * 0.12);
+      } else if (activityMotion === 'dishes') {
+        drawLimb(1, -35, 19, armWidth, -0.8 + Math.sin(performance.now() / 130) * 0.22);
+      } else {
+        drawLimb(1, -35, 18, armWidth, -armSwing);
+      }
+    }
     drawLimb(-0.5, -14, 15, legWidth, legSwing, true);
 
     ctx.restore();
@@ -196,13 +301,27 @@ const scenes = {
     name: '아늑한 내 방 (집)',
     width: 960,
     leftExit: null,
-    rightExit: { target: 'home_front', spawnX: 70 },
+    rightExit: { target: 'living_room', spawnX: 70 },
+  },
+  living_room: {
+    id: 'living_room',
+    name: '거실과 부엌',
+    width: 960,
+    leftExit: { target: 'home', spawnX: 900 },
+    rightExit: { target: 'elevator', spawnX: 70 },
+  },
+  elevator: {
+    id: 'elevator',
+    name: '엘리베이터',
+    width: 960,
+    leftExit: { target: 'living_room', spawnX: 900 },
+    rightExit: null,
   },
   home_front: {
     id: 'home_front',
     name: '집 앞',
     width: 960,
-    leftExit: { target: 'home', spawnX: 680 },
+    leftExit: { target: 'elevator', spawnX: 900 },
     rightExit: { target: 'bus_stop', spawnX: 70 },
   },
   bus_stop: {
@@ -210,7 +329,7 @@ const scenes = {
     name: '버스 정류장',
     width: 960,
     leftExit: { target: 'home_front', spawnX: 900 },
-    rightExit: { target: 'bus', spawnX: 700 },
+    rightExit: null,
   },
   bus: {
     id: 'bus',
@@ -219,63 +338,105 @@ const scenes = {
     leftExit: null,
     rightExit: null,
   },
+  refrigerator: {
+    id: 'refrigerator',
+    name: '냉장고 퍼즐',
+    width: 960,
+    leftExit: null,
+    rightExit: null,
+  },
   street: {
     id: 'street',
     name: '학원과 가게가 있는 거리',
     width: 960,
-    leftExit: { target: 'school_field', spawnX: 900 },
-    rightExit: { target: 'academy', spawnX: 70 },
+    leftExit: { target: 'academy', spawnX: 900 },
+    rightExit: { target: 'school_field', spawnX: 70 },
   },
   academy: {
     id: 'academy',
     name: '학원',
     width: 960,
-    leftExit: { target: 'street', spawnX: 900 },
-    rightExit: { target: 'home', spawnX: 680 },
+    leftExit: { target: 'bus_stop', spawnX: 102 },
+    rightExit: { target: 'street', spawnX: 70 },
   },
   school_field: {
     id: 'school_field',
     name: '학교',
     width: 960,
-    leftExit: { target: 'bus', spawnX: 860 },
-    rightExit: { target: 'street', spawnX: 70 },
+    leftExit: { target: 'street', spawnX: 900 },
+    rightExit: null,
   },
 };
 
 const gameFlow = {
   completed: new Set(),
+  breakfastBowl: 'none',
+  ateToday: false,
+  skipMealGate: false,
+  cerealEver: false,
+  breakfastEver: false,
+  fridgeEver: false,
+  dishesPrompted: false,
+  visitedSchool: false,
+  day: 1,
   mode: null,
   selectedEnding: null,
   finale: null,
   nearby: null,
-  busTime: 0,
-  miniGame: null,
 };
 let lastFlowFrame = performance.now();
+let busStopSignalStartedAt = 0;
+function isCrossingSignalRed() {
+  return (performance.now() - busStopSignalStartedAt) % 10000 < 7000;
+}
+const busArrival = { state: 'waiting', x: -697, idleSince: null };
+const busStopHint = { firstSeatAt: null, shown: false };
+const busJourney = { state: 'boarding', stopIndex: 0, departAt: null, bellPressed: false, sceneryOffset: 0, movingUntil: 0, standingSince: null, safetyWarned: false };
+const busStops = ['따분함', '지루함', '똑같음', '학교'];
 
 const sceneActivities = {
+  home: [
+    { id: 'cactus', x: 763, bounds: { x: 749, y: 144, width: 29, height: 64 }, label: '선인장에게 말 걸기', text: '선인장에게 말을 걸어본다. 오늘도 잘 지내자.' },
+  ],
+  bus: [
+    { id: 'bus_exit', x: 846, bounds: { x: 758, y: 58, width: 176, height: 262 }, label: '학교에서 내리기', kind: 'leaveBus' },
+    { id: 'bus_bell_1', x: 381, bounds: { x: 372, y: 112, width: 18, height: 18 }, label: '하차벨 누르기', kind: 'busBell' },
+    { id: 'bus_bell_2', x: 742, bounds: { x: 733, y: 112, width: 18, height: 18 }, label: '하차벨 누르기', kind: 'busBell' },
+    ...Array.from({ length: 4 }, (_, seatIndex) => {
+      const chairX = 56 + seatIndex * 180;
+      return { id: `bus_seat_${seatIndex}`, x: chairX + 25, bounds: { x: chairX, y: 177, width: 50, height: 143 }, label: '버스 의자에 앉기', kind: 'seat', seatX: chairX + 25, seatY: 248 };
+    }),
+  ],
+  living_room: [
+    { id: 'kitchen_chair', x: 573, bounds: { x: 548, y: 177, width: 50, height: 143 }, label: '의자에 앉기', kind: 'seat', seatX: 573, seatY: 248 },
+    { id: 'right_chair', x: 888, bounds: { x: 863, y: 177, width: 50, height: 143 }, label: '의자에 앉기', kind: 'seat', seatX: 888, seatY: 248, facing: -1 },
+    { id: 'cereal', x: 663, bounds: { x: 642, y: 192, width: 42, height: 16 }, label: '시리얼 먹기', kind: 'seatedTask', seatId: 'kitchen_chair', text: '매일 먹는 시리얼을 챙겨 먹는다.' },
+    { id: 'breakfast', x: 805, bounds: { x: 784, y: 192, width: 42, height: 16 }, label: '아침밥 먹기', kind: 'seatedTask', seatId: 'right_chair', text: '아침밥을 먹는다. 든든하게 하루를 시작한다.' },
+    { id: 'fridge', x: 55, bounds: { x: 0, y: 70, width: 111, height: 250 }, label: '아침밥 준비하기', kind: 'fridge' },
+    { id: 'dishes', x: 185, bounds: { x: 133, y: 165, width: 99, height: 27 }, label: '설거지하기', kind: 'dishes', text: '사용한 그릇을 깨끗이 씻는다. 부엌이 한결 산뜻해졌다.' },
+  ],
+  elevator: [
+    { id: 'elevator_buttons', x: 141, bounds: { x: 132, y: 191, width: 18, height: 40 }, label: '엘리베이터 타기', kind: 'homeFrontExit' },
+    { id: 'stairs_door', x: 715, bounds: { x: 655, y: 84, width: 120, height: 236 }, label: '계단으로 내려가기', kind: 'homeFrontExit' },
+  ],
   home_front: [
-    { id: 'flower', x: 210, label: '꽃 향기 맡기', text: '꽃 향기를 맡아본다. 생각보다 좋은 냄새가 난다. 기분이 조금 좋아진 것 같다.' },
-    { id: 'cat', x: 430, label: '고양이에게 간식 주기', text: '고양이에게 간식을 건넨다. 맛있게 먹는 모습을 보니 마음이 놓인다.' },
-    { id: 'guard', x: 790, label: '경비 아저씨와 인사하기', text: '먼저 인사를 건넨다. 안녕하세요. 평소보다 기분 좋게 길을 나선다.' },
+    { id: 'flower', x: FLOWER_CENTER + PLANTER_SHIFT, bounds: { x: FLOWER_CENTER + PLANTER_SHIFT - 14, y: FLOWER_CENTER_TOP - PLANTER_RAISE + PLANTER_DROP, width: 28, height: 264 - FLOWER_CENTER_TOP }, label: '꽃 향기 맡기', text: '꽃 향기를 맡아본다. 생각보다 좋은 냄새가 난다. 기분이 조금 좋아진 것 같다.' },
+    { id: 'guard', x: 852, bounds: { x: 764, y: 88, width: 176, height: 138 * 0.7 }, label: '경비 아저씨와 인사하기', text: '먼저 인사를 건넨다. 안녕하세요. 평소보다 기분 좋게 길을 나선다.' },
   ],
   bus_stop: [
-    { id: 'crosswalk', x: 250, label: '흰 칸만 밟아 건너기', text: '횡단보도의 흰 칸만 골라 밟는다. 하나, 둘. 오랜만에 해보니 조금 재미있다.' },
-    { id: 'snack', x: 600, label: '간식 사 먹기', text: '따뜻한 간식을 한입 먹는다. 별것 아닌데 기분이 좋아진다.' },
+    { id: 'crossing_signal', x: 53, bounds: { x: 30, y: 48, width: 46, height: 272 }, label: '횡단보도 건너기', kind: 'crossing' },
+    { id: 'bus_stop_bench', x: 650 - BUS_STOP_LEFT_SHIFT, bounds: { x: 585 - BUS_STOP_LEFT_SHIFT, y: 255, width: 260, height: 65 }, label: '정류장 의자에 앉기', kind: 'seat', seatX: 650 - BUS_STOP_LEFT_SHIFT, seatY: 255 },
+    { id: 'cat', x: 770 - BUS_STOP_LEFT_SHIFT, bounds: { x: 745 - BUS_STOP_LEFT_SHIFT, y: 228, width: 74, height: 27 }, label: '고양이 쓰다듬기', text: '고양이를 조심스럽게 쓰다듬는다. 따뜻한 온기가 손끝에 전해진다.' },
   ],
   street: [
-    { id: 'sign', x: 180, label: '간판 자세히 보기', text: '늘 지나치던 간판을 찬찬히 바라본다. 이런 그림이 있었구나.' },
-    { id: 'poem', x: 420, label: '서점의 시 읽기', text: '유리창 너머의 짧은 문장을 읽는다. 오늘은 천천히 가도 괜찮아.' },
-    { id: 'sky', x: 760, label: '하늘 바라보기', kind: 'happy', text: '잠시 걸음을 멈추고 하늘을 바라본다. 구름이 천천히 흘러간다.' },
+    { id: 'sign', x: 180, bounds: { x: 30, y: 92, width: 280, height: 34 }, label: '간판 자세히 보기', text: '늘 지나치던 간판을 찬찬히 바라본다. 이런 그림이 있었구나.' },
+    { id: 'poem', x: 420, bounds: { x: 388, y: 130, width: 182, height: 86 }, label: '서점의 시 읽기', text: '유리창 너머의 짧은 문장을 읽는다. 오늘은 천천히 가도 괜찮아.' },
+    { id: 'sky', x: 760, bounds: { x: 718, y: 24, width: 98, height: 42 }, label: '하늘 바라보기', kind: 'happy', text: '잠시 걸음을 멈추고 하늘을 바라본다. 구름이 천천히 흘러간다.' },
   ],
-  school_field: [
-    { id: 'presentation', x: 220, label: '수업에서 발표하기', text: '사람들 앞에서 생각을 말해본다. 생각보다 떨리지 않는다.' },
-    { id: 'football', x: 720, label: '축구에 끼기', text: '나도 같이 해도 돼? 공을 주고받다 보니 웃음이 난다.' },
-    { id: 'friend', x: 470, label: '친구의 제안 듣기', kind: 'friend', text: '친구가 평소 안 가던 길로 함께 가보자고 한다.' },
-  ],
+  school_field: [],
   academy: [
-    { id: 'vending', x: 300, label: '자판기 음료 마시기', text: '차가운 음료를 한 모금 마신다. 잠깐 숨을 돌린다.' },
-    { id: 'slow_walk', x: 650, label: '천천히 귀가하기', text: '서두르지 않고 천천히 걷는다. 저녁 공기가 시원하다.' },
+    { id: 'vending', x: 300, bounds: { x: 274, y: 182, width: 54, height: 116 }, label: '자판기 음료 마시기', text: '차가운 음료를 한 모금 마신다. 잠깐 숨을 돌린다.' },
+    { id: 'slow_walk', x: 650, bounds: { x: 626, y: 256, width: 192, height: 48 }, label: '천천히 귀가하기', text: '서두르지 않고 천천히 걷는다. 저녁 공기가 시원하다.' },
   ],
 };
 
@@ -286,16 +447,44 @@ let currentScene = scenes[currentSceneId];
 function changeScene(sceneId, spawnX) {
   if (!scenes[sceneId]) return;
   const previousSceneId = currentSceneId;
+  if (sceneId === 'bus' && previousSceneId === 'bus_stop' && busArrival.state === 'departing') {
+    setFlowMode(null);
+  }
   currentSceneId = sceneId;
   currentScene = scenes[sceneId];
+  if (sceneId === 'bus') {
+    busJourney.state = 'boarding';
+    busJourney.stopIndex = 0;
+    busJourney.departAt = null;
+    busJourney.bellPressed = false;
+    busJourney.sceneryOffset = 0;
+    busJourney.standingSince = null;
+    busJourney.safetyWarned = false;
+  }
+  if (sceneId === 'school_field') gameFlow.visitedSchool = true;
+  if (sceneId === 'bus_stop') {
+    busStopSignalStartedAt = performance.now();
+    busArrival.state = 'waiting';
+    busArrival.x = -697;
+    busArrival.idleSince = null;
+    busStopHint.firstSeatAt = null;
+    busStopHint.shown = false;
+  }
   player.x = spawnX;
   player.y = PLAYER_BASE_Y;
   player.state = 'IDLE';
+  player.sitting = null;
 
-  if (sceneId === 'bus') {
-    gameFlow.busTime = 0;
+  if (sceneId === 'refrigerator') {
+    resetRefrigeratorPuzzle();
+    setFlowMode('puzzle');
+  } else if (sceneId === 'living_room' && previousSceneId === 'refrigerator' && gameFlow.breakfastBowl === 'carried') {
+    gameFlow.dialogue = '아침밥을 해 먹었다. 기분 좋게 하루를 시작해보자.';
+    gameFlow.activityMotion = null;
+    setFlowMode('dialogue');
   }
-  if (sceneId === 'home' && previousSceneId === 'academy' && gameFlow.selectedEnding) {
+
+  if (sceneId === 'home' && gameFlow.visitedSchool && gameFlow.selectedEnding) {
     const endings = {
       happiness: ['소소한 행복', '늘 걷던 길에서 발견한 작은 즐거움이 오늘을 다르게 만들었다.'],
       different: ['평소와 다른 일상', '친구와 함께한 작은 모험이 익숙한 하루에 새로운 장면을 더했다.'],
@@ -303,6 +492,16 @@ function changeScene(sceneId, spawnX) {
     const [title, message] = endings[gameFlow.selectedEnding];
     gameFlow.finale = { title, message, night: false };
     gameFlow.mode = 'finale';
+  }
+  if (sceneId === 'home' && gameFlow.visitedSchool) {
+    gameFlow.visitedSchool = false;
+    gameFlow.day++;
+    gameFlow.ateToday = false;
+    gameFlow.skipMealGate = false;
+    gameFlow.breakfastBowl = 'none';
+    gameFlow.completed.delete('cereal');
+    gameFlow.completed.delete('breakfast');
+    gameFlow.completed.delete('breakfast_prepared');
   }
 
   // Update Location Badge HUD
@@ -314,36 +513,125 @@ function changeScene(sceneId, spawnX) {
 }
 
 function currentActivities() {
-  const activities = [...(sceneActivities[currentSceneId] || [])];
-  if (currentSceneId === 'bus') {
-    activities.push({ id: 'bus_door', x: 790, label: '학교에서 내리기', kind: 'busDoor' });
+  const activities = (sceneActivities[currentSceneId] || []).filter(activity => {
+    if (activity.kind === 'seatedTask') return !gameFlow.ateToday && player.sitting?.seatId === activity.seatId && (activity.id !== 'breakfast' || gameFlow.breakfastBowl === 'placed');
+    if (activity.id === 'kitchen_chair') return !gameFlow.completed.has('breakfast_prepared');
+    if (activity.id === 'right_chair') return gameFlow.completed.has('breakfast_prepared');
+    if (activity.id === 'fridge') return gameFlow.cerealEver && !gameFlow.ateToday && !gameFlow.completed.has('breakfast_prepared');
+    if (activity.id === 'dishes') return gameFlow.ateToday && (!gameFlow.dishesPrompted || gameFlow.completed.has('breakfast_prepared'));
+    if (activity.kind === 'busBell') return busJourney.state === 'stopped' && !busJourney.bellPressed;
+    return true;
+  });
+  if (currentSceneId === 'bus_stop' && busArrival.state === 'stopped') {
+    return [{ id: 'arrived_bus', x: player.x, bounds: { x: busArrival.x, y: 48, width: 697, height: 272 }, label: '버스 타기', kind: 'boardBus' }];
   }
   return activities;
 }
 
 function setFlowMode(mode) {
   gameFlow.mode = mode;
+  if (mode === 'dialogue') gameFlow.dialogueUntil = performance.now() + 1500;
   keys.left = false;
   keys.right = false;
   keys.speedBoost = false;
 }
 
-function startEscapeMiniGame() {
-  setFlowMode('dodge');
-  gameFlow.miniGame = {
-    elapsed: 0,
-    spawnTimer: 0,
-    obstacles: [],
-    playerX: canvas.width / 2,
-    lives: 3,
-  };
-}
-
 function interactWith(activity) {
+  if (activity.kind === 'seatedTask' && (gameFlow.ateToday || currentSceneId !== 'living_room' || player.sitting?.seatId !== activity.seatId || (activity.id === 'breakfast' && gameFlow.breakfastBowl !== 'placed'))) return;
+  if (activity.kind === 'dishes' && (!gameFlow.ateToday || gameFlow.completed.has('dishes') || (gameFlow.dishesPrompted && !gameFlow.completed.has('breakfast_prepared')))) return;
   window.soundEngine.playInteractionSelect();
 
-  if (activity.kind === 'busDoor') {
-    changeScene('school_field', 70);
+  if (activity.kind === 'dishes' && !gameFlow.dishesPrompted) {
+    gameFlow.dishesPrompted = true;
+    gameFlow.dialogue = '부모님이 하실 테니까 굳이 안 해도 될 것 같다.';
+    gameFlow.activityMotion = null;
+    setFlowMode('dialogue');
+    return;
+  }
+
+  if (activity.kind === 'seat') {
+    setFlowMode(null);
+    player.x = activity.seatX;
+    player.y = PLAYER_BASE_Y;
+    player.facing = activity.facing || 1;
+    player.state = 'IDLE';
+    player.sitting = { seatY: activity.seatY, seatId: activity.id };
+    if (currentSceneId === 'bus_stop' && activity.id === 'bus_stop_bench' && busStopHint.firstSeatAt === null) {
+      busStopHint.firstSeatAt = performance.now();
+    }
+    if (currentSceneId === 'bus' && busJourney.state === 'boarding') {
+      busJourney.state = 'moving';
+      busJourney.movingUntil = performance.now() + 5000;
+      busJourney.departAt = null;
+    }
+    if (activity.id === 'right_chair' && gameFlow.breakfastBowl === 'carried') gameFlow.breakfastBowl = 'placed';
+    return;
+  }
+
+  if (activity.kind === 'fridge') {
+    if (!gameFlow.cerealEver || gameFlow.ateToday || gameFlow.completed.has('breakfast_prepared')) return;
+    setFlowMode(null);
+    sceneTransition.start('refrigerator', 55);
+    return;
+  }
+
+  if (activity.kind === 'homeFrontExit') {
+    setFlowMode(null);
+    sceneTransition.start('home_front', 70);
+    return;
+  }
+
+  if (activity.kind === 'crossing') {
+    if (isCrossingSignalRed()) {
+      gameFlow.dialogue = '지금은 빨간불이다.';
+      gameFlow.activityMotion = null;
+      setFlowMode('dialogue');
+      return;
+    }
+    player.sitting = null;
+    player.facing = 1;
+    gameFlow.crossingStartedAt = performance.now();
+    gameFlow.dialogue = '횡단보도를 건너 학원가로 향한다.';
+    gameFlow.activityMotion = null;
+    setFlowMode('crossing');
+    return;
+  }
+
+  if (activity.kind === 'boardBus') {
+    player.sitting = null;
+    setFlowMode('bus_departure');
+    busArrival.state = 'departing';
+    return;
+  }
+
+  if (activity.kind === 'busBell') {
+    if (currentSceneId !== 'bus' || busJourney.state !== 'stopped' || busJourney.bellPressed) return;
+    busJourney.bellPressed = true;
+    busJourney.departAt = null;
+    if (busJourney.stopIndex < busStops.length) {
+      gameFlow.dialogue = `학교까지는 아직 ${busStops.length - busJourney.stopIndex}정거장이 남았다.`;
+      gameFlow.activityMotion = null;
+      setFlowMode('dialogue');
+    }
+    return;
+  }
+
+  if (activity.kind === 'leaveBus') {
+    if (currentSceneId !== 'bus' || player.sitting || busJourney.state !== 'stopped') return;
+    if (!busJourney.bellPressed || busJourney.stopIndex < busStops.length) {
+      gameFlow.dialogue = busJourney.stopIndex < busStops.length
+        ? `학교까지는 아직 ${busStops.length - busJourney.stopIndex}정거장이 남았다.`
+        : '먼저 하차벨을 눌러야 한다.';
+      gameFlow.activityMotion = null;
+      setFlowMode('dialogue');
+      if (busJourney.bellPressed && busJourney.stopIndex < busStops.length) {
+        busJourney.bellPressed = false;
+        busJourney.departAt = null;
+      }
+      return;
+    }
+    setFlowMode(null);
+    sceneTransition.start('school_field', 70);
     return;
   }
 
@@ -362,20 +650,29 @@ function interactWith(activity) {
   }
 
   gameFlow.completed.add(activity.id);
+  if (activity.id === 'cereal' || activity.id === 'breakfast') gameFlow.ateToday = true;
+  if (activity.id === 'cereal') gameFlow.cerealEver = true;
+  if (activity.id === 'breakfast') gameFlow.breakfastEver = true;
   gameFlow.dialogue = activity.text;
+  if (activity.id === 'cat') window.soundEngine.playCatEvent();
+  if (activity.id === 'cereal' || activity.id === 'breakfast') window.soundEngine.playCrunchEvent();
+  if (activity.id === 'dishes') window.soundEngine.playDishwashingEvent();
+  gameFlow.activityMotion = activity.id === 'breakfast' ? 'cereal' : (['cat', 'flower', 'guard', 'cereal', 'dishes'].includes(activity.id) ? activity.id : null);
+  if (gameFlow.activityMotion) {
+    player.facing = activity.x >= player.x ? 1 : -1;
+    if (activity.id === 'cat') {
+      player.facing = 1;
+      if (!player.sitting) player.x = 710 - BUS_STOP_LEFT_SHIFT;
+    } else if (activity.id === 'dishes') {
+      player.x = 218;
+      player.facing = -1;
+    }
+  }
   setFlowMode('dialogue');
 }
 
 function handleGameFlowKey(event) {
   if (!gameFlow.mode) return false;
-
-  if (gameFlow.mode === 'dodge' && event.key === '2') {
-    gameFlow.mode = null;
-    gameFlow.miniGame = null;
-    gameFlow.busTime = 0;
-    event.preventDefault();
-    return true;
-  }
 
   if (gameFlow.mode === 'typing') {
     if (/^[a-z]$/i.test(event.key)) {
@@ -395,16 +692,18 @@ function handleGameFlowKey(event) {
     return true;
   }
 
-  if (gameFlow.mode === 'dialogue' || gameFlow.mode === 'finale') {
+  if (gameFlow.mode === 'dialogue') {
+    event.preventDefault();
+    return true;
+  }
+
+  if (gameFlow.mode === 'finale') {
     if (event.key === 'e' || event.key === 'E' || event.key === 'Enter' || event.key === ' ') {
-      if (gameFlow.mode === 'finale' && gameFlow.finale?.night) {
+      if (gameFlow.finale?.night) {
         gameFlow.finale = null;
-        gameFlow.mode = null;
-      } else if (gameFlow.mode === 'finale') {
         gameFlow.mode = null;
       } else {
         gameFlow.mode = null;
-        gameFlow.dialogue = null;
       }
     }
     event.preventDefault();
@@ -416,6 +715,17 @@ function handleGameFlowKey(event) {
 }
 
 function updateGameFlow(deltaSeconds) {
+  if (gameFlow.mode === 'crossing' && performance.now() - gameFlow.crossingStartedAt >= 1500) {
+    setFlowMode(null);
+    gameFlow.dialogue = null;
+    sceneTransition.start('academy', 70);
+  }
+  if (gameFlow.mode === 'dialogue' && performance.now() >= gameFlow.dialogueUntil) {
+    gameFlow.mode = null;
+    gameFlow.dialogue = null;
+    gameFlow.activityMotion = null;
+  }
+
   if (gameFlow.mode === 'calm') {
     gameFlow.calmTime -= deltaSeconds;
     if (gameFlow.calmTime <= 0) {
@@ -424,56 +734,92 @@ function updateGameFlow(deltaSeconds) {
       gameFlow.dialogue = `${gameFlow.calmText} 마음이 조금 가벼워진다. 천천히 집으로 돌아가자.`;
       setFlowMode('dialogue');
     }
-  } else if (currentSceneId === 'bus' && !gameFlow.mode) {
-    gameFlow.busTime += deltaSeconds;
-    if (gameFlow.busTime >= 8) {
-      startEscapeMiniGame();
-    }
-  } else if (gameFlow.mode === 'dodge') {
-    const miniGame = gameFlow.miniGame;
-    miniGame.elapsed += deltaSeconds;
-    miniGame.spawnTimer -= deltaSeconds;
+  }
 
-    const stage = Math.min(2, Math.floor(miniGame.elapsed / 10));
-    const spawnInterval = stage === 1 ? 0.72 : stage === 2 ? 1.15 : 1.05;
-    if (miniGame.spawnTimer <= 0) {
-      miniGame.obstacles.push({
-        x: 70 + Math.random() * (canvas.width - 140),
-        y: -24,
-        size: 16 + Math.random() * 12,
-        speed: 90 + stage * 30 + Math.random() * 25,
-        label: ['알림', '숙제', '시간표'][Math.floor(Math.random() * 3)],
-      });
-      miniGame.spawnTimer = spawnInterval;
-    }
-
-    for (const obstacle of miniGame.obstacles) {
-      obstacle.y += obstacle.speed * deltaSeconds;
-      if (!obstacle.hit && obstacle.y > canvas.height - 65 && obstacle.y < canvas.height - 34
-        && Math.abs(obstacle.x - miniGame.playerX) < obstacle.size + 18) {
-        obstacle.hit = true;
-        miniGame.lives--;
-        if (miniGame.lives <= 0) {
-          miniGame.lives = 3;
-          miniGame.elapsed = Math.max(0, miniGame.elapsed - 3);
-        }
+  if (currentSceneId === 'bus') {
+    if (busJourney.state === 'moving') {
+      busJourney.sceneryOffset = (busJourney.sceneryOffset + 120 * deltaSeconds) % 600;
+      if (performance.now() >= busJourney.movingUntil) {
+        busJourney.state = 'stopped';
+        const stopName = busStops[Math.min(busJourney.stopIndex, busStops.length - 1)];
+        busJourney.stopIndex = Math.min(busJourney.stopIndex + 1, busStops.length);
+        busJourney.departAt = null;
+        busJourney.bellPressed = false;
+        busJourney.standingSince = null;
+        busJourney.safetyWarned = false;
+        gameFlow.dialogue = `이번 정류장은 ${stopName} 정류장입니다.`;
+        gameFlow.activityMotion = null;
+        setFlowMode('dialogue');
       }
     }
-    miniGame.obstacles = miniGame.obstacles.filter(obstacle => obstacle.y < canvas.height + 30);
+    if (busJourney.state === 'stopped' && busJourney.stopIndex < busStops.length) {
+      if (player.sitting) {
+        busJourney.standingSince = null;
+        busJourney.safetyWarned = false;
+      } else if (busJourney.standingSince === null) {
+        busJourney.standingSince = performance.now();
+      } else if (!busJourney.safetyWarned && !gameFlow.mode && performance.now() - busJourney.standingSince >= 3000) {
+        busJourney.safetyWarned = true;
+        gameFlow.dialogue = '안전을 위해 자리에 앉아주세요.';
+        gameFlow.activityMotion = null;
+        setFlowMode('dialogue');
+      }
+    }
+    if (busJourney.state === 'stopped' && !busJourney.bellPressed) {
+      const showingSafetyNotice = gameFlow.mode === 'dialogue' && gameFlow.dialogue === '안전을 위해 자리에 앉아주세요.';
+      if ((gameFlow.mode && !showingSafetyNotice) || keys.left || keys.right || keys.speedBoost) {
+        busJourney.departAt = null;
+      } else if (busJourney.departAt === null) {
+        busJourney.departAt = performance.now() + 3000;
+      } else if (performance.now() >= busJourney.departAt) {
+        busJourney.state = 'moving';
+        busJourney.movingUntil = performance.now() + 5000;
+        busJourney.departAt = null;
+        keys.left = false;
+        keys.right = false;
+      }
+    }
+  }
 
-    if (miniGame.elapsed >= 30) {
-      gameFlow.finale = {
-        title: '일탈',
-        message: '종점에서 내린 뒤, 밤하늘의 별을 오래 바라본다. 오늘은 나만의 속도로 여기까지 왔다.',
-        night: true,
-      };
-      gameFlow.selectedEnding = 'escape';
-      setFlowMode('finale');
+  if (currentSceneId === 'bus_stop') {
+    if (busStopHint.firstSeatAt !== null && !busStopHint.shown && !gameFlow.mode && !sceneTransition.active &&
+        busArrival.state !== 'departing' && performance.now() - busStopHint.firstSeatAt >= 10000) {
+      busStopHint.shown = true;
+      gameFlow.dialogue = '버스 정류장에 앉아서 버스를 기다리자.';
+      gameFlow.activityMotion = null;
+      setFlowMode('dialogue');
+    }
+    if (busArrival.state === 'waiting') {
+      if (player.sitting?.seatId === 'bus_stop_bench' && !gameFlow.mode && !keys.left && !keys.right) {
+        if (busArrival.idleSince === null) busArrival.idleSince = performance.now();
+        if (performance.now() - busArrival.idleSince >= 3000) busArrival.state = 'arriving';
+      } else {
+        busArrival.idleSince = null;
+      }
+    } else if (busArrival.state === 'arriving') {
+      const stopX = 920 - BUS_STOP_LEFT_SHIFT - 697;
+      busArrival.x = Math.min(stopX, busArrival.x + 380 * deltaSeconds);
+      if (busArrival.x >= stopX) busArrival.state = 'stopped';
+    } else if (busArrival.state === 'departing' && !sceneTransition.active) {
+      busArrival.x = Math.min(currentScene.width, busArrival.x + 380 * deltaSeconds);
+      if (busArrival.x >= currentScene.width) sceneTransition.start('bus', 100);
     }
   }
 
   gameFlow.nearby = null;
-  if (!gameFlow.mode) {
+  if (!gameFlow.mode && currentSceneId === 'bus_stop' && busArrival.state === 'stopped') {
+    gameFlow.nearby = !player.sitting && Math.abs(player.x - 53) < 82
+      ? sceneActivities.bus_stop.find(activity => activity.id === 'crossing_signal')
+      : currentActivities()[0];
+  } else if (currentSceneId === 'bus_stop' && busArrival.state === 'arriving') {
+    return;
+  } else if (!gameFlow.mode && player.sitting && currentSceneId === 'living_room') {
+    gameFlow.nearby = currentActivities().find(activity => activity.kind === 'seatedTask' && !gameFlow.completed.has(activity.id)) || null;
+  } else if (!gameFlow.mode && player.sitting && currentSceneId === 'bus') {
+    gameFlow.nearby = currentActivities().find(activity => activity.kind === 'busBell' && Math.abs(player.x - activity.x) < 82) || null;
+  } else if (!gameFlow.mode && player.sitting?.seatId === 'bus_stop_bench' && currentSceneId === 'bus_stop' && !gameFlow.completed.has('cat')) {
+    gameFlow.nearby = sceneActivities.bus_stop.find(activity => activity.id === 'cat');
+  } else if (!gameFlow.mode && !player.sitting) {
     let nearestDistance = 82;
     for (const activity of currentActivities()) {
       if (gameFlow.completed.has(activity.id)) continue;
@@ -486,12 +832,261 @@ function updateGameFlow(deltaSeconds) {
   }
 }
 
-function drawCenterMessage(ctx, message, subtitle = '') {
+function drawNearbyActivityHighlight(ctx) {
+  const activity = gameFlow.nearby;
+  const bounds = activity?.bounds;
+  if (!bounds) return;
+
+  ctx.save();
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 3;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+  ctx.shadowBlur = 5;
+
+  if (activity.id === 'crossing_signal') {
+    ctx.beginPath();
+    ctx.moveTo(30, 48);
+    ctx.lineTo(76, 48);
+    ctx.lineTo(76, 144);
+    ctx.lineTo(58, 144);
+    ctx.lineTo(58, 320);
+    ctx.lineTo(48, 320);
+    ctx.lineTo(48, 144);
+    ctx.lineTo(30, 144);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id.startsWith('bus_seat_')) {
+    ctx.translate(bounds.x, 0);
+    ctx.beginPath();
+    ctx.moveTo(0, 177);
+    ctx.lineTo(8, 177);
+    ctx.lineTo(8, 248);
+    ctx.lineTo(50, 248);
+    ctx.lineTo(50, 264);
+    ctx.lineTo(8, 264);
+    ctx.lineTo(8, 320);
+    ctx.lineTo(0, 320);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'right_chair') {
+    ctx.beginPath();
+    ctx.moveTo(913, 177);
+    ctx.lineTo(905, 177);
+    ctx.lineTo(905, 248);
+    ctx.lineTo(863, 248);
+    ctx.lineTo(863, 320);
+    ctx.lineTo(871, 320);
+    ctx.lineTo(871, 256);
+    ctx.lineTo(905, 256);
+    ctx.lineTo(905, 320);
+    ctx.lineTo(913, 320);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'kitchen_chair') {
+    ctx.translate(bounds.x - 548, 0);
+    ctx.beginPath();
+    ctx.moveTo(548, 177);
+    ctx.lineTo(556, 177);
+    ctx.lineTo(556, 248);
+    ctx.lineTo(598, 248);
+    ctx.lineTo(598, 320);
+    ctx.lineTo(590, 320);
+    ctx.lineTo(590, 256);
+    ctx.lineTo(556, 256);
+    ctx.lineTo(556, 320);
+    ctx.lineTo(548, 320);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'bus_stop_bench') {
+    ctx.translate(-BUS_STOP_LEFT_SHIFT, 0);
+    ctx.beginPath();
+    ctx.moveTo(585, 255);
+    ctx.lineTo(845, 255);
+    ctx.lineTo(845, 320);
+    ctx.lineTo(835, 320);
+    ctx.lineTo(835, 265);
+    ctx.lineTo(595, 265);
+    ctx.lineTo(595, 320);
+    ctx.lineTo(585, 320);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'cereal' || activity.id === 'breakfast') {
+    if (activity.id === 'breakfast') ctx.translate(142, 0);
+    ctx.beginPath();
+    ctx.moveTo(642, 192);
+    ctx.lineTo(684, 192);
+    ctx.lineTo(678, 208);
+    ctx.lineTo(648, 208);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'cat') {
+    ctx.translate(-BUS_STOP_LEFT_SHIFT, 0);
+    ctx.translate(0, 20);
+    ctx.beginPath();
+    ctx.moveTo(745, 212);
+    ctx.lineTo(747, 212);
+    ctx.lineTo(747, 208);
+    ctx.lineTo(753, 208);
+    ctx.lineTo(753, 212);
+    ctx.lineTo(759, 212);
+    ctx.lineTo(759, 208);
+    ctx.lineTo(765, 208);
+    ctx.lineTo(765, 212);
+    ctx.lineTo(768, 212);
+    ctx.lineTo(768, 217);
+    ctx.lineTo(812, 217);
+    ctx.lineTo(812, 225);
+    ctx.lineTo(819, 225);
+    ctx.lineTo(819, 235);
+    ctx.lineTo(745, 235);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'dishes') {
+    ctx.beginPath();
+    ctx.moveTo(133, 187);
+    ctx.lineTo(180, 187);
+    ctx.lineTo(180, 165);
+    ctx.lineTo(201, 165);
+    ctx.lineTo(201, 175);
+    ctx.lineTo(196, 175);
+    ctx.lineTo(196, 170);
+    ctx.lineTo(185, 170);
+    ctx.lineTo(185, 187);
+    ctx.lineTo(232, 187);
+    ctx.lineTo(232, 192);
+    ctx.lineTo(133, 192);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'cactus') {
+    traceCactus(ctx);
+    ctx.stroke();
+  } else if (activity.id === 'elevator_buttons') {
+    ctx.strokeRect(132, 191, 18, 18);
+    ctx.strokeRect(132, 213, 18, 18);
+  } else if (activity.id === 'flower') {
+    ctx.translate(PLANTER_SHIFT + FLOWER_CENTER - 330, PLANTER_DROP - PLANTER_RAISE + FLOWER_CENTER_TOP - 198);
+    ctx.beginPath();
+    ctx.moveTo(326, 198);
+    ctx.lineTo(334, 198);
+    ctx.lineTo(334, 204);
+    ctx.lineTo(342, 204);
+    ctx.lineTo(342, 212);
+    ctx.lineTo(338, 212);
+    ctx.lineTo(338, 218);
+    ctx.lineTo(322, 218);
+    ctx.lineTo(322, 212);
+    ctx.lineTo(318, 212);
+    ctx.lineTo(318, 204);
+    ctx.lineTo(326, 204);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(328, 216);
+    ctx.lineTo(328, 462 - FLOWER_CENTER_TOP);
+    ctx.lineTo(332, 462 - FLOWER_CENTER_TOP);
+    ctx.lineTo(332, 216);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(328, 240);
+    ctx.lineTo(320, 236);
+    ctx.lineTo(318, 240);
+    ctx.lineTo(328, 244);
+    ctx.closePath();
+    ctx.moveTo(332, 234);
+    ctx.lineTo(340, 230);
+    ctx.lineTo(342, 234);
+    ctx.lineTo(332, 238);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'sky') {
+    ctx.beginPath();
+    ctx.moveTo(736, 40);
+    ctx.lineTo(748, 40);
+    ctx.lineTo(748, 30);
+    ctx.lineTo(776, 30);
+    ctx.lineTo(776, 40);
+    ctx.lineTo(788, 40);
+    ctx.lineTo(788, 46);
+    ctx.lineTo(796, 46);
+    ctx.lineTo(796, 56);
+    ctx.lineTo(736, 56);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'friend') {
+    ctx.beginPath();
+    ctx.moveTo(459, 210);
+    ctx.lineTo(480, 210);
+    ctx.lineTo(480, 230);
+    ctx.lineTo(477, 230);
+    ctx.lineTo(477, 236);
+    ctx.lineTo(491, 236);
+    ctx.lineTo(491, 242);
+    ctx.lineTo(477, 242);
+    ctx.lineTo(477, 264);
+    ctx.lineTo(480, 304);
+    ctx.lineTo(472, 304);
+    ctx.lineTo(468, 264);
+    ctx.lineTo(466, 264);
+    ctx.lineTo(466, 304);
+    ctx.lineTo(458, 304);
+    ctx.lineTo(458, 264);
+    ctx.lineTo(462, 242);
+    ctx.lineTo(448, 242);
+    ctx.lineTo(448, 236);
+    ctx.lineTo(462, 236);
+    ctx.lineTo(462, 230);
+    ctx.lineTo(459, 230);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'slow_walk') {
+    ctx.beginPath();
+    ctx.moveTo(630, 260);
+    ctx.lineTo(814, 260);
+    ctx.lineTo(814, 270);
+    ctx.lineTo(800, 270);
+    ctx.lineTo(800, 304);
+    ctx.lineTo(790, 304);
+    ctx.lineTo(790, 270);
+    ctx.lineTo(652, 270);
+    ctx.lineTo(652, 304);
+    ctx.lineTo(642, 304);
+    ctx.lineTo(642, 270);
+    ctx.lineTo(630, 270);
+    ctx.closePath();
+    ctx.stroke();
+  } else if (activity.id === 'presentation') {
+    ctx.strokeRect(160, 194, 150, 126);
+  } else if (activity.id === 'football') {
+    ctx.strokeRect(706, 286, 15, 15);
+  } else if (activity.id === 'sign') {
+    ctx.strokeRect(34, 96, 272, 25);
+  } else if (activity.id === 'poem') {
+    ctx.strokeRect(391, 134, 176, 78);
+  } else if (activity.id === 'vending') {
+    ctx.strokeRect(276, 184, 50, 112);
+  } else if (activity.id === 'arrived_bus') {
+    ctx.strokeRect(busArrival.x, 48, 697, 272);
+  } else {
+    ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+  }
+  if (activity.kind === 'busBell') {
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('하차벨', bounds.x + bounds.width / 2, bounds.y - 20);
+    ctx.font = '11px sans-serif';
+    ctx.fillText('[K]로 상호작용', bounds.x + bounds.width / 2, bounds.y - 5);
+  }
+  ctx.restore();
+}
+
+function drawCenterMessage(ctx, message, subtitle = '', backgroundOpacity = 1) {
   const panelWidth = 680;
   const panelHeight = subtitle ? 92 : 72;
   const panelX = (canvas.width - panelWidth) / 2;
   const panelY = (canvas.height - panelHeight) / 2;
-  ctx.fillStyle = '#292929';
+  ctx.fillStyle = `rgba(41, 41, 41, ${backgroundOpacity})`;
   ctx.fillRect(panelX, panelY, panelWidth, panelHeight);
   ctx.fillStyle = '#ffffff';
   ctx.textAlign = 'center';
@@ -505,38 +1100,10 @@ function drawCenterMessage(ctx, message, subtitle = '') {
 }
 
 function drawFlowOverlay(ctx) {
-  if (gameFlow.mode === 'dodge') {
-    const miniGame = gameFlow.miniGame;
-    const stage = Math.min(3, Math.floor(miniGame.elapsed / 10) + 1);
-    ctx.fillStyle = '#242424';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#393939';
-    for (let y = 30; y < canvas.height; y += 42) {
-      ctx.fillRect(0, y + (miniGame.elapsed * 34 % 42), canvas.width, 2);
-    }
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 16px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(`버스는 계속 달린다 · 구간 ${stage}/3`, canvas.width / 2, 28);
-    ctx.font = '11px sans-serif';
-    ctx.fillText('마우스를 움직여 해야 할 일들을 피하세요', canvas.width / 2, 47);
-    ctx.fillText('2: 미니게임 나가기', canvas.width - 18, 24);
-    ctx.textAlign = 'left';
-    ctx.fillText(`남은 시간 ${Math.ceil(30 - miniGame.elapsed)}초   여유 ${miniGame.lives}`, 18, 24);
-
-    for (const obstacle of miniGame.obstacles) {
-      ctx.fillStyle = '#9b9b9b';
-      ctx.fillRect(obstacle.x - obstacle.size / 2, obstacle.y, obstacle.size, obstacle.size);
-      ctx.fillStyle = '#222222';
-      ctx.font = '9px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(obstacle.label, obstacle.x, obstacle.y + obstacle.size / 2 + 3);
-    }
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(miniGame.playerX - 11, canvas.height - 53, 22, 30);
+  if (gameFlow.mode === 'crossing') {
+    drawCenterMessage(ctx, gameFlow.dialogue, '', 0.3);
     return;
   }
-
   if (gameFlow.mode === 'typing') {
     drawCenterMessage(ctx, '친구의 제안에 답해보자', `${gameFlow.typing.value}▯   GO 입력`);
     return;
@@ -546,7 +1113,8 @@ function drawFlowOverlay(ctx) {
     return;
   }
   if (gameFlow.mode === 'dialogue') {
-    drawCenterMessage(ctx, gameFlow.dialogue);
+    const stopAnnouncement = currentSceneId === 'bus' && busJourney.state === 'stopped' && gameFlow.dialogue?.startsWith('이번 정류장은 ');
+    drawCenterMessage(ctx, gameFlow.dialogue, stopAnnouncement ? '내리실 분은 하차벨 [K]를 누른 후, 문으로 하차해 주세요.' : '', 0.3);
     return;
   }
   if (gameFlow.mode === 'finale' && gameFlow.finale) {
@@ -613,6 +1181,27 @@ function updateAndDrawParticles(ctx) {
   ctx.globalAlpha = 1.0;
 }
 
+function traceCactus(ctx) {
+  ctx.beginPath();
+  ctx.moveTo(757, GROUND_Y - 176);
+  ctx.lineTo(769, GROUND_Y - 176);
+  ctx.lineTo(769, GROUND_Y - 154);
+  ctx.lineTo(773, GROUND_Y - 154);
+  ctx.lineTo(773, GROUND_Y - 164);
+  ctx.lineTo(778, GROUND_Y - 164);
+  ctx.lineTo(778, GROUND_Y - 149);
+  ctx.lineTo(769, GROUND_Y - 149);
+  ctx.lineTo(769, GROUND_Y - 144);
+  ctx.lineTo(757, GROUND_Y - 144);
+  ctx.lineTo(757, GROUND_Y - 156);
+  ctx.lineTo(749, GROUND_Y - 156);
+  ctx.lineTo(749, GROUND_Y - 171);
+  ctx.lineTo(754, GROUND_Y - 171);
+  ctx.lineTo(754, GROUND_Y - 161);
+  ctx.lineTo(757, GROUND_Y - 161);
+  ctx.closePath();
+}
+
 function drawRoomFurniture(ctx) {
   const paneWidth = 82;
   const paneHeight = 123;
@@ -621,17 +1210,16 @@ function drawRoomFurniture(ctx) {
   const windowTop = 74;
   const windowLeft = windowCenterX - (paneWidth * 2 + paneGap) / 2;
 
-  ctx.fillStyle = '#dedede';
+  ctx.fillStyle = WINDOW_COLOR;
   ctx.fillRect(windowLeft, windowTop, paneWidth, paneHeight);
   ctx.fillRect(windowLeft + paneWidth + paneGap, windowTop, paneWidth, paneHeight);
 
-  ctx.fillStyle = '#666666';
-  ctx.fillRect(0, GROUND_Y - 122, 15, 97);
   ctx.fillStyle = '#d8d8d8';
   ctx.fillRect(15, GROUND_Y - 82, 275, 47);
   ctx.fillStyle = '#888888';
   ctx.fillRect(107, GROUND_Y - 82, 183, 47);
   ctx.fillStyle = '#555555';
+  ctx.fillRect(0, GROUND_Y - 122, 15, 97);
   ctx.fillRect(0, GROUND_Y - 35, 290, 13);
   ctx.fillRect(20, GROUND_Y - 22, 15, 22);
   ctx.fillRect(255, GROUND_Y - 22, 15, 22);
@@ -649,14 +1237,11 @@ function drawRoomFurniture(ctx) {
   ctx.fillRect(883, GROUND_Y - 134, 14, 20);
   ctx.fillRect(869, GROUND_Y - 114, 42, 4);
 
-  ctx.fillStyle = '#555555';
-  ctx.fillRect(758, GROUND_Y - 176, 12, 32);
-  ctx.fillRect(750, GROUND_Y - 161, 8, 5);
-  ctx.fillRect(750, GROUND_Y - 171, 5, 15);
-  ctx.fillRect(770, GROUND_Y - 154, 9, 5);
-  ctx.fillRect(774, GROUND_Y - 164, 5, 15);
+  ctx.fillStyle = gameFlow.completed.has('cactus') ? '#67966a' : '#555555';
+  traceCactus(ctx);
+  ctx.fill();
 
-  ctx.fillStyle = '#666666';
+  ctx.fillStyle = gameFlow.completed.has('cactus') ? '#d99aa9' : '#7d7d7d';
   ctx.beginPath();
   ctx.moveTo(742, GROUND_Y - 144);
   ctx.lineTo(784, GROUND_Y - 144);
@@ -675,147 +1260,166 @@ function drawOutdoorBackground(ctx, scene) {
   if (scene.id === 'home_front') {
     ctx.fillStyle = '#b5b5b5';
     ctx.fillRect(0, 0, 960, 320);
-    ctx.fillStyle = wall;
-    ctx.fillRect(28, 38, 430, 210);
-    ctx.fillRect(484, 83, 150, 165);
-    ctx.fillStyle = dark;
-    for (let row = 0; row < 3; row++) {
-      for (let column = 0; column < 5; column++) {
-        ctx.fillRect(48 + column * 78, 60 + row * 58, 42, 30);
-      }
-    }
-    ctx.fillStyle = mid;
-    ctx.fillRect(701, 178, 154, 142);
-    ctx.fillStyle = light;
-    ctx.fillRect(718, 198, 70, 40);
 
+    // A narrow apartment block sits beneath a canopy along the top edge.
+    ctx.fillStyle = wall;
+    ctx.fillRect(0, 28, 75, 292);
+    ctx.fillStyle = mid;
+    ctx.fillRect(0, 0, 155, 32);
+    ctx.fillStyle = mid;
+    ctx.fillRect(0, 30, 155, 4);
+
+    // The planter stays monochrome until its flower task is complete.
+    ctx.save();
+    ctx.translate(PLANTER_SHIFT, PLANTER_DROP);
     const flowerDone = gameFlow.completed.has('flower');
-    ctx.fillStyle = flowerDone ? '#5d8a65' : dark;
-    ctx.fillRect(208, 278, 4, 33);
-    ctx.fillRect(200, 294, 10, 4);
-    ctx.fillRect(211, 287, 10, 4);
-    ctx.fillStyle = flowerDone ? '#e5c76d' : light;
-    ctx.fillRect(203, 266, 8, 8);
-    ctx.fillRect(211, 266, 8, 8);
-    ctx.fillRect(207, 262, 8, 8);
-    ctx.fillStyle = dark;
-    ctx.fillRect(418, 290, 28, 15);
-    ctx.fillRect(438, 281, 13, 14);
-    ctx.fillRect(439, 278, 5, 6);
-    ctx.fillRect(447, 278, 5, 6);
-    ctx.fillRect(414, 285, 6, 4);
-    ctx.fillStyle = gameFlow.completed.has('cat') ? '#b9a2c7' : light;
-    ctx.fillRect(445, 287, 5, 4);
+    ctx.fillStyle = flowerDone ? '#806c50' : '#777777';
+    ctx.fillRect(58, 264 - PLANTER_RAISE, 431.5, 56 + PLANTER_RAISE - PLANTER_DROP);
+    ctx.fillStyle = flowerDone ? '#719d79' : '#999999';
+    ctx.fillRect(63, 133, 423.5, 131 - PLANTER_RAISE);
+    ctx.translate(0, -PLANTER_RAISE);
+    const flowerPlants = [
+      { x: 108.25, top: 222 }, { x: 163.75, top: 210 },
+      { x: 219.25, top: 222 }, { x: FLOWER_CENTER, top: FLOWER_CENTER_TOP },
+      { x: 330.25, top: 222 }, { x: 385.75, top: 210 },
+      { x: 441.25, top: 222 },
+    ];
+    for (const plant of flowerPlants) {
+      const leafColor = flowerDone ? '#4e7952' : '#666666';
+      const petalColor = flowerDone ? '#b9a2c7' : '#b0b0b0';
+      ctx.fillStyle = leafColor;
+      ctx.fillRect(plant.x - 2, plant.top + 16, 4, 264 - plant.top - 16);
+      ctx.fillRect(plant.x - 12, plant.top + 38, 12, 4);
+      ctx.fillRect(plant.x + 2, plant.top + 31, 12, 4);
+      ctx.fillStyle = petalColor;
+      ctx.fillRect(plant.x - 10, plant.top + 6, 8, 8);
+      ctx.fillRect(plant.x - 4, plant.top, 8, 8);
+      ctx.fillRect(plant.x + 4, plant.top + 6, 8, 8);
+      ctx.fillRect(plant.x - 4, plant.top + 12, 8, 8);
+      ctx.fillStyle = flowerDone ? '#f6e8aa' : '#d0d0d0';
+      ctx.fillRect(plant.x - 2, plant.top + 7, 4, 4);
+    }
+    ctx.restore();
+
+    // Guard booth is flush with the right edge and the screen bottom.
+    const guardDone = gameFlow.completed.has('guard');
+    ctx.fillStyle = guardDone ? '#739bb5' : '#777777';
+    ctx.fillRect(744, 0, 216, 320);
+    ctx.fillStyle = guardDone ? '#517892' : wall;
+    ctx.fillRect(760, 40, 184, 32);
+    ctx.fillStyle = light;
+    ctx.font = 'bold 15px sans-serif';
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillText('경비실', 852, 62);
+    ctx.restore();
+    ctx.fillStyle = guardDone ? '#a9cad0' : WINDOW_COLOR;
+    ctx.fillRect(764, 88, 176, 138 * 0.7);
     return;
   }
 
   if (scene.id === 'bus_stop') {
     ctx.fillStyle = '#b5b5b5';
     ctx.fillRect(0, 0, 960, 320);
-    ctx.fillStyle = wall;
-    ctx.fillRect(35, 40, 250, 190);
-    ctx.fillRect(320, 70, 176, 160);
-    ctx.fillStyle = dark;
-    ctx.fillRect(55, 60, 62, 42);
-    ctx.fillRect(145, 60, 62, 42);
-    ctx.fillRect(340, 92, 54, 38);
-    ctx.fillRect(413, 92, 54, 38);
+    ctx.save();
+    ctx.translate(24, 0);
     ctx.fillStyle = mid;
-    ctx.fillRect(124, 132, 484, 8);
-    ctx.fillRect(132, 140, 8, 115);
-    ctx.fillRect(595, 140, 8, 115);
-    ctx.fillRect(206, 220, 318, 12);
-    ctx.fillRect(218, 232, 12, 35);
-    ctx.fillRect(500, 232, 12, 35);
-    ctx.fillStyle = light;
-    ctx.fillRect(223, 150, 170, 54);
+    ctx.fillRect(24, 132, 10, 188);
     ctx.fillStyle = dark;
+    ctx.fillRect(6, 48, 46, 96);
+    ctx.fillStyle = '#666666';
+    ctx.fillRect(14, 57, 30, 30);
+    ctx.fillStyle = '#a3a3a3';
+    ctx.fillRect(14, 105, 30, 30);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#ffffff';
+    ctx.strokeRect(14, isCrossingSignalRed() ? 57 : 105, 30, 30);
+    ctx.restore();
+    ctx.save();
+    ctx.translate(-20 - BUS_STOP_LEFT_SHIFT, 0);
+    ctx.fillStyle = '#999999';
+    ctx.fillRect(530, 80, 410, 240);
+    ctx.fillStyle = '#858585';
+    ctx.fillRect(530, 80, 410, 34);
+    ctx.fillRect(530, 114, 34 / 3, 206);
+    ctx.fillRect(940 - 34 / 3, 114, 34 / 3, 206);
+    ctx.fillStyle = mid;
+    ctx.fillRect(605, 255, 260, 10);
+    ctx.fillRect(605, 265, 10, 55);
+    ctx.fillRect(855, 265, 10, 55);
+    ctx.fillStyle = gameFlow.completed.has('cat') ? '#dc8742' : '#484848';
+    ctx.fillRect(775, 237, 57, 18);
+    ctx.fillRect(823, 245, 16, 10);
+    const catHeadDrop = gameFlow.mode === 'dialogue' && gameFlow.activityMotion === 'cat'
+      ? Math.round((1 + Math.sin(performance.now() / 160)) * 2)
+      : 0;
+    ctx.fillRect(765, 232 + catHeadDrop, 23, 23 - catHeadDrop);
+    ctx.fillRect(767, 228 + catHeadDrop, 6, 8);
+    ctx.fillRect(779, 228 + catHeadDrop, 6, 8);
+    ctx.fillStyle = '#b0b0b0';
+    ctx.fillRect(769, 241 + catHeadDrop, 7, 2);
+    ctx.fillStyle = light;
+    ctx.save();
     ctx.font = 'bold 15px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('정류장', 308, 183);
-    for (let stripe = 0; stripe < 6; stripe++) {
-      ctx.fillStyle = stripe % 2 ? light : mid;
-      ctx.fillRect(180 + stripe * 28, 280, 18, 30);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('집', 610, 97);
+    ctx.fillText('정류장', 735, 97);
+    ctx.fillText('학교', 860, 97);
+    for (const arrowX of [674, 804]) {
+      ctx.beginPath();
+      ctx.moveTo(arrowX - 4.33, 92);
+      ctx.lineTo(arrowX + 4.33, 97);
+      ctx.lineTo(arrowX - 4.33, 102);
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.fillStyle = mid;
-    ctx.fillRect(560, 190, 128, 104);
-    ctx.fillStyle = light;
-    ctx.fillRect(570, 202, 108, 16);
-    ctx.fillStyle = dark;
-    ctx.fillRect(574, 229, 100, 65);
-    ctx.fillStyle = gameFlow.completed.has('snack') ? '#d2a55a' : '#b0b0b0';
-    ctx.fillRect(586, 247, 24, 28);
-    ctx.fillRect(619, 238, 35, 37);
-    return;
-  }
-
-  if (scene.id === 'bus') {
-    ctx.fillStyle = '#969696';
-    ctx.fillRect(0, 0, 960, 320);
-    ctx.fillStyle = dark;
-    ctx.fillRect(0, 36, 960, 18);
-    ctx.fillStyle = wall;
-    ctx.fillRect(0, 54, 960, 230);
-    for (let window = 0; window < 5; window++) {
-      ctx.fillStyle = '#d4d4d4';
-      ctx.fillRect(40 + window * 142, 70, 118, 94);
-      ctx.fillStyle = mid;
-      ctx.fillRect(40 + window * 142, 164, 118, 8);
-      ctx.fillRect(45 + window * 142, 206, 100, 10);
-      ctx.fillRect(55 + window * 142, 216, 9, 68);
-      ctx.fillRect(127 + window * 142, 216, 9, 68);
-    }
-    ctx.fillStyle = gameFlow.busTime < 8 ? '#555555' : '#eeeeee';
-    ctx.fillRect(790, 54, 10, 230);
-    ctx.fillStyle = dark;
-    ctx.fillRect(18, 228, 22, 56);
-    ctx.fillRect(922, 228, 22, 56);
+    ctx.restore();
+    ctx.restore();
     return;
   }
 
   if (scene.id === 'school_field') {
     ctx.fillStyle = '#b5b5b5';
     ctx.fillRect(0, 0, 960, 320);
-    ctx.fillStyle = wall;
-    ctx.fillRect(25, 50, 450, 180);
-    ctx.fillRect(44, 24, 170, 26);
-    ctx.fillStyle = dark;
-    for (let window = 0; window < 5; window++) {
-      ctx.fillRect(50 + window * 78, 78, 48, 36);
-      ctx.fillRect(50 + window * 78, 132, 48, 36);
-    }
+    ctx.save();
+    ctx.translate(80 - 530, 0);
+    ctx.fillStyle = '#999999';
+    ctx.fillRect(530, 80, 410, 240);
+    ctx.fillStyle = '#858585';
+    ctx.fillRect(530, 80, 410, 34);
+    ctx.fillRect(530, 114, 34 / 3, 206);
+    ctx.fillRect(940 - 34 / 3, 114, 34 / 3, 206);
     ctx.fillStyle = mid;
-    ctx.fillRect(160, 194, 150, 126);
+    ctx.fillRect(605, 255, 260, 10);
+    ctx.fillRect(605, 265, 10, 55);
+    ctx.fillRect(855, 265, 10, 55);
     ctx.fillStyle = light;
-    ctx.fillRect(172, 210, 124, 110);
-    ctx.fillStyle = dark;
-    ctx.fillRect(196, 220, 76, 8);
-    ctx.fillRect(210, 244, 48, 48);
-
-    ctx.fillStyle = '#777777';
-    ctx.fillRect(674, 242, 4, 64);
-    ctx.fillRect(674, 242, 68, 4);
-    ctx.fillRect(738, 242, 4, 64);
-    ctx.strokeStyle = dark;
-    ctx.lineWidth = 2;
-    ctx.strokeRect(684, 252, 50, 42);
-    ctx.fillStyle = gameFlow.completed.has('football') ? '#d4d4d4' : '#777777';
-    ctx.fillRect(706, 286, 15, 15);
-
-    const friendTone = gameFlow.selectedEnding === 'different' ? '#eeeeee' : '#777777';
-    ctx.fillStyle = friendTone;
-    ctx.fillRect(462, 230, 15, 34);
-    ctx.fillRect(459, 210, 21, 20);
-    ctx.fillRect(458, 264, 8, 40);
-    ctx.fillRect(472, 264, 8, 40);
-    ctx.fillRect(448, 236, 14, 6);
-    ctx.fillRect(477, 236, 14, 6);
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('집', 610, 97);
+    ctx.fillText('학교', 735, 97);
+    ctx.fillText('바다', 860, 97);
+    for (const arrowX of [674, 804]) {
+      ctx.beginPath();
+      ctx.moveTo(arrowX - 4.33, 92);
+      ctx.lineTo(arrowX + 4.33, 97);
+      ctx.lineTo(arrowX - 4.33, 102);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
     return;
   }
 
   if (scene.id === 'street') {
     ctx.fillStyle = '#b5b5b5';
     ctx.fillRect(0, 0, 960, 320);
+    ctx.fillStyle = '#dedede';
+    ctx.fillRect(736, 40, 52, 16);
+    ctx.fillRect(748, 30, 28, 12);
+    ctx.fillRect(780, 46, 16, 10);
     ctx.fillStyle = wall;
     ctx.fillRect(20, 72, 300, 204);
     ctx.fillRect(340, 42, 294, 234);
@@ -894,36 +1498,25 @@ function drawOutdoorBackground(ctx, scene) {
 }
 
 function drawOutdoorForeground(ctx, scene) {
-  if (scene.id === 'home_front') {
-    const flowerDone = gameFlow.completed.has('flower');
-    ctx.fillStyle = flowerDone ? '#5d8a65' : '#484848';
-    ctx.fillRect(208, 278, 4, 33);
-    ctx.fillRect(200, 294, 10, 4);
-    ctx.fillRect(211, 287, 10, 4);
-    ctx.fillStyle = flowerDone ? '#e5c76d' : '#dddddd';
-    ctx.fillRect(203, 266, 8, 8);
-    ctx.fillRect(211, 266, 8, 8);
-    ctx.fillRect(207, 262, 8, 8);
-
+  if (scene.id === 'bus_stop' && busArrival.state !== 'waiting') {
+    ctx.fillStyle = '#777777';
+    ctx.fillRect(busArrival.x, 48, 697, 272);
+    ctx.fillStyle = '#dedede';
+    for (let windowIndex = 0; windowIndex < 4; windowIndex++) {
+      ctx.fillRect(busArrival.x + 46 + windowIndex * 153, 85, 124, 70);
+    }
     ctx.fillStyle = '#484848';
-    ctx.fillRect(418, 290, 28, 15);
-    ctx.fillRect(438, 281, 13, 14);
-    ctx.fillRect(439, 278, 5, 6);
-    ctx.fillRect(447, 278, 5, 6);
-    ctx.fillRect(414, 285, 6, 4);
-    ctx.fillStyle = gameFlow.completed.has('cat') ? '#b9a2c7' : '#dddddd';
-    ctx.fillRect(445, 287, 5, 4);
-  } else if (scene.id === 'school_field') {
-    const friendTone = gameFlow.selectedEnding === 'different' ? '#eeeeee' : '#777777';
-    ctx.fillStyle = friendTone;
-    ctx.fillRect(462, 230, 15, 34);
-    ctx.fillRect(459, 210, 21, 20);
-    ctx.fillRect(458, 264, 8, 40);
-    ctx.fillRect(472, 264, 8, 40);
-    ctx.fillRect(448, 236, 14, 6);
-    ctx.fillRect(477, 236, 14, 6);
-    ctx.fillStyle = gameFlow.completed.has('football') ? '#d4d4d4' : '#777777';
-    ctx.fillRect(706, 286, 15, 15);
+    ctx.fillRect(busArrival.x + 66, 230, 90, 90);
+    ctx.fillRect(busArrival.x + 541, 230, 90, 90);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(busArrival.x + 66 + (90 - 30) / 2, 230 + (90 - 30) / 2, 30, 30);
+    ctx.fillRect(busArrival.x + 541 + (90 - 30) / 2, 230 + (90 - 30) / 2, 30, 30);
+    ctx.fillStyle = '#dedede';
+    ctx.fillRect(busArrival.x + 675, 203, 22, 32);
+  }
+  if (scene.id === 'home_front' && player.facing === -1) {
+    ctx.fillStyle = '#858585';
+    ctx.fillRect(0, 34, 75, 286);
   }
 }
 
@@ -931,11 +1524,163 @@ function drawSceneBackground(ctx, scene) {
   ctx.fillStyle = '#b5b5b5';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  if (scene.id === 'home') {
+  if (scene.id === 'refrigerator') {
+    drawRefrigeratorPuzzle(ctx);
+  } else if (scene.id === 'bus') {
+    ctx.fillStyle = '#969696';
+    ctx.fillRect(0, 0, 960, 320);
+    ctx.fillStyle = '#dedede';
+    for (let windowIndex = 0; windowIndex < 4; windowIndex++) {
+      const windowX = 36 + windowIndex * 180;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(windowX, 62, 150, 100);
+      ctx.clip();
+      ctx.fillStyle = '#dedede';
+      ctx.fillRect(windowX, 62, 150, 100);
+      ctx.fillStyle = '#b7b7b7';
+      for (let buildingIndex = -1; buildingIndex < 15; buildingIndex++) {
+        const buildingX = buildingIndex * 120 - busJourney.sceneryOffset;
+        ctx.fillRect(buildingX, 112 - (buildingIndex % 3 + 1) * 10, 70, 70);
+      }
+      ctx.fillStyle = '#a4a4a4';
+      ctx.fillRect(windowX, 150, 150, 12);
+      ctx.restore();
+    }
+    ctx.fillStyle = '#555555';
+    ctx.fillRect(372, 112, 18, 18);
+    ctx.fillRect(733, 112, 18, 18);
+    ctx.fillStyle = '#555555';
+    for (let seatIndex = 0; seatIndex < 4; seatIndex++) {
+      const seatX = 56 + seatIndex * 180;
+      ctx.fillRect(seatX, 177, 8, 71);
+      ctx.fillRect(seatX, 248, 50, 16);
+      ctx.fillRect(seatX, 264, 8, 56);
+    }
+    ctx.fillStyle = '#bdbdbd';
+    ctx.fillRect(758, 58, 86, 262);
+    ctx.fillRect(848, 58, 86, 262);
+    ctx.fillStyle = '#777777';
+    ctx.fillRect(758, 177, 176, 6);
+  } else if (scene.id === 'home') {
     drawRoomFurniture(ctx);
+  } else if (scene.id === 'living_room') {
+    ctx.fillStyle = gameFlow.fridgeEver ? '#a9c6d6' : '#dedede';
+    ctx.fillRect(0, 70, 111, 250);
+    const dishesDone = gameFlow.completed.has('dishes');
+    ctx.fillStyle = dishesDone ? '#9aaf99' : '#777777';
+    ctx.fillRect(111, 70, 286, 66);
+    ctx.fillRect(111, 202, 286, 118);
+    ctx.fillStyle = dishesDone ? '#e4dfc9' : '#d8d8d8';
+    ctx.fillRect(111, 190, 286, 12);
+    ctx.fillStyle = dishesDone ? '#a6bdc2' : '#999999';
+    ctx.fillRect(133, 187, 99, 5);
+    ctx.fillRect(180, 165, 5, 22);
+    ctx.fillRect(180, 165, 21, 5);
+    ctx.fillRect(196, 165, 5, 10);
+    ctx.fillRect(264, 190, 123, 5);
+    if (gameFlow.mode === 'dialogue' && gameFlow.activityMotion === 'dishes') {
+      ctx.fillStyle = '#b7dfe6';
+      ctx.fillRect(197, 175, 3, 12);
+      ctx.fillRect(191, 183 + Math.round(Math.sin(performance.now() / 100) * 2), 4, 3);
+    }
+    ctx.fillStyle = '#d2d2d2';
+    ctx.fillRect(0, 174, 111, 5 / 3);
+    ctx.fillStyle = '#b0b0b0';
+    ctx.fillRect(92, 130.7275, 5, 31.36);
+    ctx.fillRect(92, 196.9025, 5, 47.04);
+    ctx.fillStyle = '#6d6d6d';
+    ctx.fillRect(111 + 286 / 3 - 5 / 6, 70, 5 / 3, 66);
+    ctx.fillRect(111 + 286 * 2 / 3 - 5 / 6, 70, 5 / 3, 66);
+    ctx.fillRect(111 + 286 / 4 - 5 / 6, 202, 5 / 3, 118);
+    ctx.fillRect(111 + 286 / 2 - 5 / 6, 202, 5 / 3, 118);
+    ctx.fillRect(254, 202 + 118 / 3 - 5 / 6, 143, 5 / 3);
+    ctx.fillRect(254, 202 + 118 * 2 / 3 - 5 / 6, 143, 5 / 3);
+    ctx.fillStyle = '#c9c9c9';
+    ctx.fillRect(144.7, 128.5, 26.6, 2.5);
+    ctx.fillRect(240.7, 128.5, 26.6, 2.5);
+    ctx.fillRect(335.7, 128.5, 26.6, 2.5);
+    ctx.fillRect(172, 247.49, 2.5, 23.52);
+    ctx.fillRect(190.5, 247.49, 2.5, 23.52);
+    ctx.fillRect(308.2, 214, 33.6, 2.5);
+    ctx.fillRect(308.2, 253, 33.6, 2.5);
+    ctx.fillRect(308.2, 292, 33.6, 2.5);
+    ctx.fillStyle = '#dedede';
+    ctx.fillRect(610, GROUND_Y - 112, 241, 18);
+    ctx.fillRect(610, GROUND_Y - 94, 11, 94);
+    ctx.fillRect(840, GROUND_Y - 94, 11, 94);
+    ctx.fillRect(548, 177, 8, 79);
+    ctx.fillRect(548, 248, 50, 8);
+    ctx.fillRect(548, 256, 8, 64);
+    ctx.fillRect(590, 256, 8, 64);
+    ctx.fillRect(905, 177, 8, 79);
+    ctx.fillRect(863, 248, 50, 8);
+    ctx.fillRect(863, 256, 8, 64);
+    ctx.fillRect(905, 256, 8, 64);
+    ctx.fillStyle = '#999999';
+    ctx.fillRect(712, 148, 42, 60);
+    ctx.fillStyle = '#dedede';
+    ctx.save();
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('씨리얼', 733, 182);
+    ctx.restore();
+    ctx.fillStyle = '#777777';
+    ctx.beginPath();
+    ctx.moveTo(642, GROUND_Y - 128);
+    ctx.lineTo(684, GROUND_Y - 128);
+    ctx.lineTo(678, GROUND_Y - 112);
+    ctx.lineTo(648, GROUND_Y - 112);
+    ctx.closePath();
+    ctx.fill();
+    if (gameFlow.breakfastBowl === 'placed') {
+      ctx.fillStyle = gameFlow.breakfastEver ? '#87b2c2' : '#777777';
+      ctx.beginPath();
+      ctx.moveTo(784, GROUND_Y - 128);
+      ctx.lineTo(826, GROUND_Y - 128);
+      ctx.lineTo(820, GROUND_Y - 112);
+      ctx.lineTo(790, GROUND_Y - 112);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (scene.id === 'elevator') {
+    ctx.fillStyle = '#999999';
+    ctx.fillRect(180, 84, 120, 236);
+    ctx.fillRect(304, 84, 120, 236);
+    ctx.fillStyle = '#777777';
+    ctx.fillRect(132, 191, 18, 18);
+    ctx.fillRect(132, 213, 18, 18);
+    ctx.fillStyle = '#999999';
+    ctx.fillRect(655, 84, 120, 236);
+    ctx.fillStyle = '#777777';
+    ctx.fillRect(752, 216, 8, 8);
+    ctx.fillStyle = '#858585';
+    ctx.fillRect(667, 106, 96, 32);
+    ctx.save();
+    ctx.fillStyle = '#dddddd';
+    ctx.font = 'bold 15px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('계단', 715, 128);
+    ctx.restore();
   } else {
     drawOutdoorBackground(ctx, scene);
   }
+}
+
+let showShortcutHelp = false;
+
+function drawShortcutHelp(ctx) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(25, 25, 25, 0.88)';
+  ctx.fillRect(20, 20, 420, 105);
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = '14px sans-serif';
+  ctx.fillText('1  이동 속도 높이기', 35, 40);
+  ctx.fillText('2  부엌 식사 제한 건너뛰기', 35, 65);
+  ctx.fillText('3  정류장: 버스 도착·출발 건너뛰기 / 버스 안: 학교', 35, 90);
+  ctx.restore();
 }
 
 // Main Game Loop
@@ -959,8 +1704,29 @@ function gameLoop() {
   drawSceneBackground(ctx, currentScene);
 
   // 2. Player Character
-  player.draw(ctx);
+  if (currentSceneId !== 'refrigerator' && !(currentSceneId === 'bus_stop' && busArrival.state === 'departing')) {
+    player.draw(ctx);
+    if (gameFlow.breakfastBowl === 'carried') {
+      const bowlX = player.x + player.facing * 28;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 9;
+      ctx.beginPath();
+      ctx.moveTo(player.x, GROUND_Y - 95);
+      ctx.lineTo(player.x + player.facing * 12, GROUND_Y - 77);
+      ctx.lineTo(bowlX, GROUND_Y - 77);
+      ctx.stroke();
+      ctx.fillStyle = '#777777';
+      ctx.beginPath();
+      ctx.moveTo(bowlX - 18, GROUND_Y - 80);
+      ctx.lineTo(bowlX + 18, GROUND_Y - 80);
+      ctx.lineTo(bowlX + 13, GROUND_Y - 66);
+      ctx.lineTo(bowlX - 13, GROUND_Y - 66);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
   drawOutdoorForeground(ctx, currentScene);
+  drawNearbyActivityHighlight(ctx);
 
   // 4. Particle Effects
   updateAndDrawParticles(ctx);
@@ -970,6 +1736,7 @@ function gameLoop() {
 
   // Screen Fade Transition
   sceneTransition.draw(ctx);
+  if (showShortcutHelp) drawShortcutHelp(ctx);
 
   requestAnimationFrame(gameLoop);
 }
@@ -977,6 +1744,59 @@ function gameLoop() {
 // Keyboard Event Handlers (Strictly Keyboard-Only Controls)
 window.addEventListener('keydown', (e) => {
   window.soundEngine.ensureResume();
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    if (!e.repeat) showShortcutHelp = !showShortcutHelp;
+    return;
+  }
+  if (!sceneTransition.active && e.key === '2' && currentSceneId === 'living_room') {
+    e.preventDefault();
+    if (e.repeat) return;
+    gameFlow.skipMealGate = true;
+    if (gameFlow.mode === 'dialogue' && gameFlow.dialogue === '배가 고프다.') {
+      gameFlow.dialogue = null;
+      gameFlow.activityMotion = null;
+      setFlowMode(null);
+    }
+    return;
+  }
+  if (!sceneTransition.active && e.key === '3' && currentSceneId === 'bus_stop') {
+    e.preventDefault();
+    if (e.repeat) return;
+    if (busArrival.state === 'departing') {
+      busArrival.x = currentScene.width;
+      sceneTransition.start('bus', 100);
+      return;
+    }
+    busArrival.state = 'stopped';
+    busArrival.x = 920 - BUS_STOP_LEFT_SHIFT - 697;
+    busArrival.idleSince = null;
+    gameFlow.dialogue = null;
+    gameFlow.activityMotion = null;
+    setFlowMode(null);
+    updateGameFlow(0);
+    return;
+  }
+  if (!sceneTransition.active && e.key === '3' && currentSceneId === 'bus') {
+    e.preventDefault();
+    if (e.repeat) return;
+    player.sitting = null;
+    gameFlow.dialogue = null;
+    gameFlow.activityMotion = null;
+    setFlowMode(null);
+    sceneTransition.start('school_field', 70);
+    return;
+  }
+  if (currentSceneId === 'bus' && busJourney.state === 'stopped' && !busJourney.bellPressed) {
+    busJourney.departAt = null;
+  }
+  if (currentSceneId === 'bus_stop' && busArrival.state === 'departing') {
+    e.preventDefault();
+    return;
+  }
+  if (currentSceneId === 'bus_stop' && busArrival.state === 'waiting') {
+    busArrival.idleSince = null;
+  }
 
   // Sound Mute Toggle with 'M' key
   if (e.key === 'm' || e.key === 'M') {
@@ -984,11 +1804,73 @@ window.addEventListener('keydown', (e) => {
     return;
   }
 
+  if (e.key === 'x' || e.key === 'X') {
+    e.preventDefault();
+    if (e.repeat) return;
+    gameFlow.completed.clear();
+    gameFlow.breakfastBowl = 'none';
+    gameFlow.ateToday = false;
+    gameFlow.skipMealGate = false;
+    gameFlow.cerealEver = false;
+    gameFlow.breakfastEver = false;
+    gameFlow.fridgeEver = false;
+    gameFlow.dishesPrompted = false;
+    busStopHint.firstSeatAt = null;
+    busStopHint.shown = false;
+    gameFlow.visitedSchool = false;
+    gameFlow.day = 1;
+    gameFlow.selectedEnding = null;
+    gameFlow.finale = null;
+    gameFlow.dialogue = null;
+    gameFlow.typing = null;
+    gameFlow.calmTime = 0;
+    gameFlow.calmText = null;
+    gameFlow.calmId = null;
+    setFlowMode(null);
+    if (currentSceneId === 'refrigerator') sceneTransition.start('living_room', 100);
+    updateGameFlow(0);
+    return;
+  }
+
   if (handleGameFlowKey(e)) return;
   if (gameFlow.mode) return;
 
-  if ((e.key === 'e' || e.key === 'E') && gameFlow.nearby) {
+  if (currentSceneId === 'bus' && busJourney.state === 'moving') {
     e.preventDefault();
+    return;
+  }
+
+  if ((e.code === 'KeyK' || e.key === 'k' || e.key === 'K') && gameFlow.nearby?.kind === 'busBell') {
+    e.preventDefault();
+    if (e.repeat) return;
+    const activity = gameFlow.nearby;
+    gameFlow.nearby = null;
+    interactWith(activity);
+    return;
+  }
+
+  if ((e.code === 'Space' || e.key === ' ') && gameFlow.nearby?.kind === 'boardBus') {
+    e.preventDefault();
+    interactWith(gameFlow.nearby);
+    gameFlow.nearby = null;
+    return;
+  }
+
+  if ((e.code === 'Space' || e.key === ' ') && player.sitting) {
+    e.preventDefault();
+    if (gameFlow.nearby?.id === 'cat' || gameFlow.nearby?.kind === 'seatedTask') {
+      const activity = gameFlow.nearby;
+      gameFlow.nearby = null;
+      interactWith(activity);
+    } else {
+      player.sitting = null;
+    }
+    return;
+  }
+
+  if ((e.code === 'Space' || e.key === ' ') && gameFlow.nearby) {
+    e.preventDefault();
+    if (gameFlow.nearby.kind === 'busBell') return;
     const activity = gameFlow.nearby;
     gameFlow.nearby = null;
     interactWith(activity);
@@ -1020,18 +1902,6 @@ window.addEventListener('keyup', (e) => {
   }
 });
 
-canvas.addEventListener('mousemove', (e) => {
-  if (gameFlow.mode !== 'dodge' || !gameFlow.miniGame) return;
-  const rect = canvas.getBoundingClientRect();
-  const scaleX = canvas.width / rect.width;
-  gameFlow.miniGame.playerX = Math.max(24, Math.min(canvas.width - 24, (e.clientX - rect.left) * scaleX));
-});
-
-canvas.addEventListener('click', () => {
-  if (gameFlow.mode === 'dodge' && gameFlow.miniGame) {
-    gameFlow.miniGame.playerX = Math.max(24, Math.min(canvas.width - 24, gameFlow.miniGame.playerX));
-  }
-});
 
 // UI Buttons (Null-safe)
 const audioToggle = document.getElementById('audio-toggle');

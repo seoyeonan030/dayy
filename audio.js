@@ -94,26 +94,101 @@ class SoundEngine {
     osc.stop(now + 0.2);
   }
 
+  playPuzzleSound(complete = false) {
+    if (!this.ctx || this.isMuted) return;
+    const now = this.ctx.currentTime;
+    const notes = complete ? [523.25, 659.25, 783.99] : [659.25];
+    notes.forEach((frequency, index) => {
+      const start = now + index * 0.12;
+      const oscillator = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(frequency, start);
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.15, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.25);
+      oscillator.connect(gain);
+      gain.connect(this.sfxGain);
+      oscillator.start(start);
+      oscillator.stop(start + 0.25);
+    });
+  }
+
   playCatEvent() {
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
-    // Cute meow & purr harmonics
-    [523.25, 659.25, 783.99, 1046.50].forEach((freq, idx) => {
-      const osc = this.ctx.createOscillator();
+    const oscillator = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    oscillator.type = 'sawtooth';
+    oscillator.frequency.setValueAtTime(480, now);
+    oscillator.frequency.exponentialRampToValueAtTime(720, now + 0.18);
+    oscillator.frequency.exponentialRampToValueAtTime(390, now + 0.65);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1500, now);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.12, now + 0.07);
+    gain.gain.setValueAtTime(0.12, now + 0.35);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+    oscillator.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    oscillator.start(now);
+    oscillator.stop(now + 0.7);
+  }
+
+  playCrunchEvent() {
+    if (!this.ctx || this.isMuted) return;
+    const now = this.ctx.currentTime;
+    const duration = 0.12;
+    const buffer = this.ctx.createBuffer(1, Math.ceil(this.ctx.sampleRate * duration), this.ctx.sampleRate);
+    const samples = buffer.getChannelData(0);
+    for (let index = 0; index < samples.length; index++) {
+      samples[index] = Math.random() * 2 - 1;
+    }
+    [0.15, 0.43, 0.72, 1.01].forEach(offset => {
+      const source = this.ctx.createBufferSource();
+      const filter = this.ctx.createBiquadFilter();
       const gain = this.ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq * 0.9, now + idx * 0.08);
-      osc.frequency.exponentialRampToValueAtTime(freq, now + idx * 0.08 + 0.3);
-
-      gain.gain.setValueAtTime(0, now + idx * 0.08);
-      gain.gain.linearRampToValueAtTime(0.15, now + idx * 0.08 + 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.6);
-
-      osc.connect(gain);
+      source.buffer = buffer;
+      filter.type = 'highpass';
+      filter.frequency.value = 1200;
+      gain.gain.setValueAtTime(0.001, now + offset);
+      gain.gain.linearRampToValueAtTime(0.12, now + offset + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + offset + duration);
+      source.connect(filter);
+      filter.connect(gain);
       gain.connect(this.sfxGain);
-      osc.start(now + idx * 0.08);
-      osc.stop(now + idx * 0.08 + 0.6);
+      source.start(now + offset);
+      source.stop(now + offset + duration);
     });
+  }
+
+  playDishwashingEvent() {
+    if (!this.ctx || this.isMuted) return;
+    const now = this.ctx.currentTime;
+    const duration = 1.4;
+    const buffer = this.ctx.createBuffer(1, Math.ceil(this.ctx.sampleRate * duration), this.ctx.sampleRate);
+    const samples = buffer.getChannelData(0);
+    for (let index = 0; index < samples.length; index++) {
+      samples[index] = (Math.random() * 2 - 1) * (0.65 + 0.35 * Math.sin(index / this.ctx.sampleRate * 18));
+    }
+    const source = this.ctx.createBufferSource();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    source.buffer = buffer;
+    filter.type = 'bandpass';
+    filter.frequency.value = 1400;
+    filter.Q.value = 0.6;
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.13, now + 0.08);
+    gain.gain.setValueAtTime(0.13, now + 1.15);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    source.start(now);
+    source.stop(now + duration);
   }
 
   playSnackEvent() {
